@@ -59,11 +59,12 @@ export function normalizeTitle(title = '') {
   return String(title).trim().replace(/\s+/g, '').toLowerCase()
 }
 
-const draftTitle = (item = {}) => item.title
+export const getProjectTitle = (item = {}) => item.title
   || item.projectTitle
   || item.projectName
   || item.formData?.title
   || item.formData?.projectTitle
+  || item.formData?.basicInfo?.title
   || item.formData?.projectState?.basic?.projectName
   || ''
 
@@ -72,7 +73,21 @@ export function getDraftIdentity(item = {}) {
     || item.legacyProjectId
     || item.sourceProjectId
     || (item.draftSource === 'legacy-project' ? item.id : '')
-    || `${item.ownerId || ''}:${normalizeTitle(draftTitle(item))}`)
+    || `${item.ownerId || ''}:${normalizeTitle(getProjectTitle(item))}`)
+}
+
+export function isSameDraftProject(a = {}, b = {}) {
+  const sameExplicitId = Boolean(a.projectId && b.projectId) && String(a.projectId) === String(b.projectId)
+  const sameLegacyId = Boolean(a.legacyProjectId && b.legacyProjectId)
+    && String(a.legacyProjectId) === String(b.legacyProjectId)
+  const normalizedA = normalizeTitle(getProjectTitle(a))
+  const sameOwnerAndTitle = Boolean(a.ownerId && b.ownerId)
+    && String(a.ownerId) === String(b.ownerId)
+    && normalizedA !== ''
+    && normalizedA === normalizeTitle(getProjectTitle(b))
+  const isDraftLegacyPair = (a.sourceCollection === 'drafts' && b.sourceCollection === 'projects')
+    || (a.sourceCollection === 'projects' && b.sourceCollection === 'drafts')
+  return sameExplicitId || sameLegacyId || (sameOwnerAndTitle && isDraftLegacyPair)
 }
 
 function timestampMillis(value) {
@@ -97,7 +112,7 @@ const isMissingDraftValue = (value) => value == null
   || value === ''
   || (Array.isArray(value) && value.length === 0)
 
-function supplementDraftData(newer, older) {
+export function supplementDraftData(newer, older) {
   if (isMissingDraftValue(newer)) return older
   if (Array.isArray(newer) || typeof newer !== 'object' || newer instanceof Date
     || typeof newer?.toMillis === 'function' || typeof newer?.toDate === 'function') return newer
@@ -110,29 +125,39 @@ function supplementDraftData(newer, older) {
 }
 
 export function deduplicateDrafts(items = []) {
-  const map = new Map()
+  const deduplicated = []
   for (const item of items) {
-    const key = getDraftIdentity(item)
-    const source = { collection: item.draftSource === 'legacy-project' ? 'projects' : 'drafts', documentId: item.id }
-    const candidate = { ...item, draftIdentity: key, linkedDraftSources: [source] }
-    const existing = map.get(key)
-    if (!existing) {
-      map.set(key, candidate)
+    const sourceCollection = item.sourceCollection
+      || (item.draftSource === 'legacy-project' ? 'projects' : 'drafts')
+    const source = { collection: sourceCollection, documentId: item.id }
+    const candidate = {
+      ...item,
+      sourceCollection,
+      draftIdentity: getDraftIdentity(item),
+      linkedDraftSources: [source],
+    }
+    const existingIndex = deduplicated.findIndex((existing) => isSameDraftProject(existing, candidate))
+    if (existingIndex < 0) {
+      deduplicated.push(candidate)
       continue
     }
-    const itemTime = getSavedTime(candidate)
-    const existingTime = getSavedTime(existing)
-    const itemWinsTie = itemTime === existingTime && candidate.draftSource === 'drafts' && existing.draftSource !== 'drafts'
-    const newer = itemTime > existingTime || itemWinsTie ? candidate : existing
+    const existing = deduplicated[existingIndex]
+    const updatedDifference = timestampMillis(candidate.updatedAt) - timestampMillis(existing.updatedAt)
+    const savedDifference = timestampMillis(candidate.lastSavedAt) - timestampMillis(existing.lastSavedAt)
+    const candidateWins = updatedDifference > 0
+      || (updatedDifference === 0 && savedDifference > 0)
+      || (updatedDifference === 0 && savedDifference === 0
+        && candidate.sourceCollection === 'drafts' && existing.sourceCollection !== 'drafts')
+    const newer = candidateWins ? candidate : existing
     const older = newer === candidate ? existing : candidate
     const merged = supplementDraftData(newer, older)
     merged.formData = supplementDraftData(newer.formData || {}, older.formData || {})
     merged.linkedDraftSources = [...older.linkedDraftSources, ...newer.linkedDraftSources]
       .filter((entry, index, all) => all.findIndex((other) => other.collection === entry.collection && other.documentId === entry.documentId) === index)
-    merged.displaySavedAt = getSavedTimestamp(newer)
-    map.set(key, merged)
+    merged.displaySavedAt = newer.updatedAt ?? newer.lastSavedAt ?? newer.savedAt ?? newer.createdAt
+    deduplicated[existingIndex] = merged
   }
-  return [...map.values()]
+  return deduplicated
 }
 
 export function classifyStudentDashboardProjects(drafts = [], projects = []) {
@@ -141,15 +166,43 @@ export function classifyStudentDashboardProjects(drafts = [], projects = []) {
     .map((project) => ({ ...project, status: normalizeProjectStatus(project) }))
   const legacyDraftProjects = normalizedProjects
     .filter((project) => project.status === PROJECT_STATUS.DRAFT)
-  const draftProjects = deduplicateDrafts([
-    ...draftDocuments.map((draft) => ({ ...draft, draftSource: 'drafts' })),
-    ...legacyDraftProjects.map((project) => ({ ...project, draftSource: 'legacy-project' })),
-  ])
+  const combinedDrafts = [
+    ...draftDocuments.map((draft) => ({ ...draft, draftSource: 'drafts', sourceCollection: 'drafts' })),
+    ...legacyDraftProjects.map((project) => ({ ...project, draftSource: 'legacy-project', sourceCollection: 'projects' })),
+  ]
+  const deduplicatedDrafts = deduplicateDrafts(combinedDrafts)
+  console.table(combinedDrafts.map((item) => ({
+    sourceCollection: item.sourceCollection,
+    documentId: item.id,
+    projectId: item.projectId ?? '',
+    legacyProjectId: item.legacyProjectId ?? '',
+    sourceProjectId: item.sourceProjectId ?? '',
+    ownerId: item.ownerId ?? '',
+    title: getProjectTitle(item),
+    normalizedTitle: normalizeTitle(getProjectTitle(item)),
+    currentStep: item.currentStep ?? '',
+    updatedAt: item.updatedAt ?? '',
+    lastSavedAt: item.lastSavedAt ?? '',
+  })))
+  console.table(deduplicatedDrafts.map((item) => ({
+    sourceCollection: item.sourceCollection,
+    documentId: item.id,
+    projectId: item.projectId ?? '',
+    legacyProjectId: item.legacyProjectId ?? '',
+    sourceProjectId: item.sourceProjectId ?? '',
+    ownerId: item.ownerId ?? '',
+    title: getProjectTitle(item),
+    normalizedTitle: normalizeTitle(getProjectTitle(item)),
+    currentStep: item.currentStep ?? '',
+    updatedAt: item.updatedAt ?? '',
+    lastSavedAt: item.lastSavedAt ?? '',
+  })))
   const submittedProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.SUBMITTED)
   const revisionProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.REVISION_REQUESTED)
   const approvedProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.APPROVED)
   return {
-    draftProjects,
+    draftProjects: deduplicatedDrafts,
+    deduplicatedDrafts,
     submittedProjects,
     revisionProjects,
     approvedProjects,

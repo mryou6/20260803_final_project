@@ -13,7 +13,7 @@ import { boards } from './data/boards.js'
 import { parts } from './data/parts.js'
 import { planSections } from './data/planSections.js'
 import { createId, escapeHtml } from './utils/helpers.js'
-import { PROJECT_STATUS_LABELS, classifyStudentDashboardProjects, isEditableProjectStatus, normalizeProjectStatus } from './constants/projectStatus.js'
+import { PROJECT_STATUS_LABELS, classifyStudentDashboardProjects, isEditableProjectStatus, normalizeProjectStatus, supplementDraftData } from './constants/projectStatus.js'
 import { validateStep } from './utils/validation.js'
 import { checkOpenAiConnection, reviewHardware, reviewPlanning } from './services/openaiService.js'
 import { downloadProjectPlanAsDocx } from './services/documentService.js'
@@ -106,13 +106,13 @@ function formatSavedTime(value) {
 
 function renderStudentDashboard() {
   const {
-    draftProjects,
+    deduplicatedDrafts,
     submittedProjects,
     revisionProjects,
     approvedProjects,
     visibleSubmittedProjects,
   } = classifyStudentDashboardProjects(myDrafts, myProjects)
-  const draftCards = draftProjects.length ? draftProjects.map((draft) => {
+  const draftCards = deduplicatedDrafts.length ? deduplicatedDrafts.map((draft) => {
     const linkedSources = draft.linkedDraftSources ?? []
     const state = draft.formData?.projectState ?? {}
     const title = (state.basic?.projectName || draft.projectName || draft.title || draft.projectTitle)?.trim() || '제목 없는 프로젝트'
@@ -148,12 +148,12 @@ function renderStudentDashboard() {
     <section class="student-dashboard" aria-labelledby="my-projects-title">
       <div class="dashboard-heading"><div><p>STUDENT DASHBOARD</p><h1 id="my-projects-title">내 프로젝트</h1></div></div>
       <div class="project-status-summary" aria-label="프로젝트 상태 요약">
-        <div><strong>${draftProjects.length}</strong><span>작성 중</span></div><div><strong>${submittedProjects.length}</strong><span>검토 대기</span></div><div><strong>${revisionProjects.length}</strong><span>수정 요청</span></div><div><strong>${approvedProjects.length}</strong><span>승인 완료</span></div>
+        <div><strong>${deduplicatedDrafts.length}</strong><span>작성 중</span></div><div><strong>${submittedProjects.length}</strong><span>검토 대기</span></div><div><strong>${revisionProjects.length}</strong><span>수정 요청</span></div><div><strong>${approvedProjects.length}</strong><span>승인 완료</span></div>
       </div>
       <button class="button button-primary dashboard-create-button" type="button" data-action="new-project">+ 새 프로젝트 만들기</button>
       ${projectRouteMessage ? createNotice(projectRouteMessage, 'info') : ''}
       ${projectsLoading ? '<p class="projects-empty">프로젝트 목록을 불러오고 있습니다.</p>' : `
-        <section class="dashboard-project-group" aria-labelledby="draft-projects-title"><div class="project-group-heading"><h2 id="draft-projects-title">작성 중인 프로젝트</h2><span>${draftProjects.length}개</span></div><div class="my-project-grid">${draftCards}</div></section>
+        <section class="dashboard-project-group" aria-labelledby="draft-projects-title"><div class="project-group-heading"><h2 id="draft-projects-title">작성 중인 프로젝트</h2><span>${deduplicatedDrafts.length}개</span></div><div class="my-project-grid">${draftCards}</div></section>
         <section class="dashboard-project-group" aria-labelledby="submitted-projects-title"><div class="project-group-heading"><h2 id="submitted-projects-title">제출한 프로젝트</h2><span>${visibleSubmittedProjects.length}개</span></div><div class="my-project-grid">${projectCards}</div></section>
       `}
     </section>
@@ -971,13 +971,44 @@ async function handleClick(event) {
   }
 
   if (action === 'continue-merged-draft') {
-    const { draftProjects } = classifyStudentDashboardProjects(myDrafts, myProjects)
-    const selected = draftProjects.find((draft) => draft.draftIdentity === button.dataset.draftIdentity)
+    const { deduplicatedDrafts } = classifyStudentDashboardProjects(myDrafts, myProjects)
+    const selected = deduplicatedDrafts.find((draft) => draft.draftIdentity === button.dataset.draftIdentity)
     if (!selected) return
     if (selected.draftSource === 'legacy-project') {
-      button.dataset.action = 'continue-legacy-draft'
-      button.dataset.projectId = selected.id
-      button.click()
+      const existingDraftSource = selected.linkedDraftSources?.find((source) => source.collection === 'drafts')
+      const restoredState = supplementDraftData(fromProjectDocument(selected), selected.formData?.projectState || {})
+      restoredState.projectId = null
+      restoredState.status = 'draft'
+      const processLog = selected.formData?.processLog ?? selected.processLog ?? {}
+      console.log('[Legacy draft migration target]', { collection: 'projects', documentId: selected.id, title: selected.projectName })
+      const migrated = await saveDraft(studentUser, {
+        draftId: existingDraftSource?.documentId ?? null,
+        projectId: null,
+        legacyProjectId: selected.id,
+        legacyCreatedAt: selected.createdAt ?? null,
+        legacyUpdatedAt: selected.updatedAt ?? null,
+        currentStep: selected.currentStep ?? restoredState.currentStep,
+        formData: { projectState: restoredState, processLog },
+      })
+      if (!migrated.success) {
+        projectRouteMessage = migrated.error || '구버전 작성 내용을 안전하게 이전하지 못했습니다. 기존 문서는 유지됩니다.'
+        render()
+        return
+      }
+      restoreDraftData({
+        id: migrated.draftId,
+        projectId: null,
+        legacyProjectId: selected.id,
+        currentStep: restoredState.currentStep,
+        formData: { projectState: restoredState, processLog },
+        updatedAt: migrated.savedAt,
+      })
+      currentPageMode = PAGE_MODE.EDIT
+      window.history.pushState({}, '', `/student.html?draftId=${encodeURIComponent(migrated.draftId)}&mode=edit`)
+      notice = '기존 작성 내용을 임시저장 문서로 안전하게 이전했습니다.'
+      console.log('[Legacy draft source retained after migration]', { collection: 'projects', documentId: selected.id })
+      render()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
     if (!restoreDraftData(selected)) {
