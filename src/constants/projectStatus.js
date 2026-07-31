@@ -56,9 +56,20 @@ export const normalizeProjectStatus = (projectOrStatus) => {
 }
 
 export function classifyStudentDashboardProjects(drafts = [], projects = []) {
-  const draftProjects = Array.isArray(drafts) ? drafts : []
+  const draftDocuments = Array.isArray(drafts) ? drafts : []
   const normalizedProjects = (Array.isArray(projects) ? projects : [])
     .map((project) => ({ ...project, status: normalizeProjectStatus(project) }))
+  const draftLegacyIds = new Set(draftDocuments
+    .flatMap((draft) => [draft.projectId, draft.legacyProjectId])
+    .filter(Boolean)
+    .map(String))
+  const legacyDraftProjects = normalizedProjects
+    .filter((project) => project.status === PROJECT_STATUS.DRAFT)
+    .filter((project) => !draftLegacyIds.has(String(project.id || project.projectId)))
+  const draftProjects = [
+    ...draftDocuments.map((draft) => ({ ...draft, draftSource: 'drafts' })),
+    ...legacyDraftProjects.map((project) => ({ ...project, draftSource: 'legacy-project' })),
+  ]
   const submittedProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.SUBMITTED)
   const revisionProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.REVISION_REQUESTED)
   const approvedProjects = normalizedProjects.filter((project) => project.status === PROJECT_STATUS.APPROVED)
@@ -68,6 +79,6 @@ export function classifyStudentDashboardProjects(drafts = [], projects = []) {
     revisionProjects,
     approvedProjects,
     visibleSubmittedProjects: [...submittedProjects, ...revisionProjects, ...approvedProjects],
-    legacyDraftProjects: normalizedProjects.filter((project) => project.status === PROJECT_STATUS.DRAFT),
+    legacyDraftProjects,
   }
 }

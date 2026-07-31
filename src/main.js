@@ -113,8 +113,9 @@ function renderStudentDashboard() {
     visibleSubmittedProjects,
   } = classifyStudentDashboardProjects(myDrafts, myProjects)
   const draftCards = draftProjects.length ? draftProjects.map((draft) => {
+    const isLegacy = draft.draftSource === 'legacy-project'
     const state = draft.formData?.projectState ?? {}
-    const title = state.basic?.projectName?.trim() || '제목 없는 프로젝트'
+    const title = (isLegacy ? draft.projectName : state.basic?.projectName)?.trim() || '제목 없는 프로젝트'
     const currentStep = Math.max(1, Number(draft.currentStep) || 1)
     const progress = Math.min(100, Math.round(currentStep / 5 * 100))
     return `<article class="my-project-card draft-project-card">
@@ -123,8 +124,8 @@ function renderStudentDashboard() {
       <div class="project-card-progress"><span style="width:${progress}%"></span></div>
       <div class="project-card-meta"><span>현재 ${currentStep}단계 · ${progress}%</span><span>마지막 저장 ${formatSavedTime(draft.updatedAt)}</span></div>
       <div class="project-card-actions">
-        <button class="button button-primary" type="button" data-action="continue-draft" data-draft-id="${draft.id}">이어서 작성</button>
-        <button class="button project-delete-button" type="button" data-action="delete-draft" data-draft-id="${draft.id}">삭제</button>
+        <button class="button button-primary" type="button" data-action="${isLegacy ? 'continue-legacy-draft' : 'continue-draft'}" ${isLegacy ? `data-project-id="${draft.id}"` : `data-draft-id="${draft.id}"`}>이어서 작성</button>
+        <button class="button project-delete-button" type="button" data-action="${isLegacy ? 'delete-legacy-draft' : 'delete-draft'}" ${isLegacy ? `data-project-id="${draft.id}"` : `data-draft-id="${draft.id}"`}>삭제</button>
       </div>
     </article>`
   }).join('') : '<p class="projects-empty">작성 중인 프로젝트가 없습니다.</p>'
@@ -910,9 +911,73 @@ async function handleClick(event) {
     return
   }
 
+  if (action === 'continue-legacy-draft') {
+    const legacyProject = myProjects.find((project) => project.id === button.dataset.projectId)
+    if (!legacyProject || normalizeProjectStatus(legacyProject) !== 'draft') return
+    console.log('[Legacy draft migration target]', {
+      id: legacyProject.id,
+      title: legacyProject.projectName || '제목 없는 프로젝트',
+    })
+    const restoredState = fromProjectDocument(legacyProject)
+    restoredState.projectId = null
+    restoredState.status = 'draft'
+    const processLog = legacyProject.processLog ?? {}
+    const migrated = await saveDraft(studentUser, {
+      draftId: null,
+      projectId: null,
+      legacyProjectId: legacyProject.id,
+      legacyCreatedAt: legacyProject.createdAt ?? null,
+      legacyUpdatedAt: legacyProject.updatedAt ?? null,
+      currentStep: legacyProject.currentStep ?? restoredState.currentStep,
+      formData: { projectState: restoredState, processLog },
+    })
+    if (!migrated.success) {
+      projectRouteMessage = migrated.error || '구버전 작성 내용을 안전하게 이전하지 못했습니다. 기존 프로젝트는 유지됩니다.'
+      render()
+      return
+    }
+    restoreDraftData({
+      id: migrated.draftId,
+      projectId: null,
+      legacyProjectId: legacyProject.id,
+      currentStep: restoredState.currentStep,
+      formData: { projectState: restoredState, processLog },
+      updatedAt: migrated.savedAt,
+    })
+    currentPageMode = PAGE_MODE.EDIT
+    window.history.pushState({}, '', `/student.html?draftId=${encodeURIComponent(migrated.draftId)}&mode=edit`)
+    notice = '기존 작성 내용을 임시저장 문서로 안전하게 이전했습니다.'
+    render()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+
+    const removed = await deleteDraftProject(legacyProject.id, studentUser)
+    if (removed.success) {
+      myProjects = myProjects.filter((project) => project.id !== legacyProject.id)
+    } else {
+      console.warn('[Legacy draft source retained]', { id: legacyProject.id, reason: removed.error })
+      notice = '새 임시저장은 완료됐지만 기존 문서는 안전을 위해 유지했습니다.'
+      render()
+    }
+    return
+  }
+
   if (action === 'delete-draft') {
     if (!window.confirm('작성 중인 프로젝트를 삭제할까요? 삭제한 내용은 복구할 수 없습니다.')) return
     const result = await deleteDraft(button.dataset.draftId, studentUser)
+    projectRouteMessage = result.success ? '작성 중인 프로젝트를 삭제했습니다.' : result.error
+    await refreshMyProjects()
+    return
+  }
+
+  if (action === 'delete-legacy-draft') {
+    const legacyProject = myProjects.find((project) => project.id === button.dataset.projectId)
+    if (!legacyProject || normalizeProjectStatus(legacyProject) !== 'draft') return
+    if (!window.confirm('기존 작성 중 프로젝트를 삭제할까요? 삭제한 내용은 복구할 수 없습니다.')) return
+    console.log('[Legacy draft delete target]', {
+      id: legacyProject.id,
+      title: legacyProject.projectName || '제목 없는 프로젝트',
+    })
+    const result = await deleteDraftProject(legacyProject.id, studentUser)
     projectRouteMessage = result.success ? '작성 중인 프로젝트를 삭제했습니다.' : result.error
     await refreshMyProjects()
     return

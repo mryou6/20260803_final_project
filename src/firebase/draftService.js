@@ -14,7 +14,15 @@ import { sanitizeForFirestore } from '../utils/firestoreSanitizer.js'
 
 const fail = (error) => ({ success: false, error })
 
-export async function saveDraft(user, { draftId, projectId = null, currentStep = 1, formData = {} } = {}) {
+export async function saveDraft(user, {
+  draftId,
+  projectId = null,
+  legacyProjectId = null,
+  legacyCreatedAt = null,
+  legacyUpdatedAt = null,
+  currentStep = 1,
+  formData = {},
+} = {}) {
   const collectionName = 'drafts'
   const ownerId = user?.uid
   const draftRef = draftId ? doc(db, collectionName, draftId) : doc(collection(db, collectionName))
@@ -31,6 +39,9 @@ export async function saveDraft(user, { draftId, projectId = null, currentStep =
       ownerId,
       ownerEmail: user.email ?? '',
       projectId: projectId ?? null,
+      legacyProjectId: legacyProjectId ?? null,
+      legacyCreatedAt,
+      legacyUpdatedAt,
       currentStep: Math.max(1, Number(currentStep) || 1),
       formData: sanitizeForFirestore(formData),
       status: 'draft',

@@ -211,7 +211,7 @@ export async function deleteDraftProject(projectId, user) {
     if (!snapshot.exists()) return fail('프로젝트를 찾을 수 없습니다.')
     const data = snapshot.data()
     if (data.ownerId !== user.uid) return fail('이 프로젝트를 삭제할 권한이 없습니다.')
-    if (data.status !== 'draft') return fail('작성 중인 프로젝트만 삭제할 수 있습니다.')
+    if (normalizeProjectStatus(data) !== 'draft') return fail('작성 중인 프로젝트만 삭제할 수 있습니다.')
     await deleteDoc(projectRef)
     return { success: true }
   } catch (error) {
