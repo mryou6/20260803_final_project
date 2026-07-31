@@ -24,7 +24,6 @@ export function validateSubmissionData(data = {}) {
     [p.board,'사용 보드'],[p.parts,'부품 구성'],
     [completeMemberRoles && uniqueMemberRoles,'역할 분담'],[p.schedule,'제작 일정'],[completeDifficultyPlans,'어려움과 해결 계획'],[p.testPlans,'기능 테스트 계획'],
   ]
-  if (p.projectType === '생활 문제 해결형') required.push([p.problemSituation,'해결하고 싶은 문제'],[p.improvement,'개선하고 싶은 내용'])
   return required.filter(([value]) => !populated(value)).map(([,label]) => label)
 }
 

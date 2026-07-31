@@ -385,7 +385,6 @@ export function createProjectPlanDocument(projectData, user = {}) {
     ...(safeText(problem.referenceProject, '') ? createSubsection('참고하거나 응용한 작품', problem.referenceProject) : []),
     ...(safeText(problem.differentiation, '') ? createSubsection('기존 작품 또는 아이디어와의 차별점', problem.differentiation) : []),
     ...createSubsection('핵심 가치', safeArray(problem.coreValues).join(', ')),
-    ...(basic.projectType === '생활 문제 해결형' ? [...createSubsection('해결하고 싶은 문제', problem.problemSituation), ...createSubsection('개선하고 싶은 내용', problem.improvementDirection)] : []),
     createSectionTitle('3. 기능 및 하드웨어 설계'),
     ...createSubsection('반드시 구현할 핵심 기능', output.requiredFeatures.join('\n')),
     ...createSubsection('추가 구현 기능', output.optionalFeatures.join('\n')),

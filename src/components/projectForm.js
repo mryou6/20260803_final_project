@@ -54,16 +54,10 @@ function renderBasic(state) {
   </div>`
 }
 
-function conditionalIntent(state) {
-  if (state.basic.projectType === '생활 문제 해결형') return `${textarea({label:'해결하고 싶은 불편이나 문제는 무엇인가?',path:'intent.problemSituation',value:state.intent.problemSituation})}${textarea({label:'이번 작품으로 어떻게 개선하고 싶은가?',path:'intent.improvementDirection',value:state.intent.improvementDirection})}`
-  return ''
-}
-
 function renderIntent(state) {
   return `<p class="step-purpose">어떤 작품을 왜 만들고 싶은지 간단하게 정리해 보세요.</p><div class="form-grid single-column">
     ${textarea({label:'어떤 작품을 만들고 싶은가?',path:'intent.ideaDescription',value:state.intent.ideaDescription})}${textarea({label:'이 주제를 선택한 이유는 무엇인가?',path:'intent.selectionReason',value:state.intent.selectionReason})}${textarea({label:'이 작품은 누구를 위한 것인가?',path:'intent.targetUser',value:state.intent.targetUser})}${textarea({label:'참고하거나 응용한 작품이 있는가?',path:'intent.referenceProject',value:state.intent.referenceProject,required:false})}${textarea({label:'기존 작품 또는 아이디어와 다르게 만들 부분은 무엇인가?',path:'intent.differentiation',value:state.intent.differentiation,required:false})}
     <fieldset class="choice-field"><legend>프로젝트에서 가장 중요하게 구현할 가치 <b>*</b></legend><div class="choice-grid">${coreValues.map((value) => `<label class="choice-option ${state.intent.coreValues.includes(value) ? 'is-selected' : ''}"><input type="checkbox" data-action="toggle-core-value" value="${value}" ${state.intent.coreValues.includes(value) ? 'checked' : ''}/><span>${value}</span></label>`).join('')}</div>${state.intent.coreValues.includes('기타') ? field({label:'기타 가치',path:'intent.otherCoreValue',value:state.intent.otherCoreValue}) : ''}${error('intent.coreValues')}</fieldset>
-    ${conditionalIntent(state)}
   </div>`
 }
 

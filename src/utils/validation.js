@@ -13,10 +13,6 @@ export function validateStep(step, state) {
   if (step === 2) {
     ;[['intent.ideaDescription',state.intent.ideaDescription,'만들고 싶은 작품을 입력해 주세요.'],['intent.selectionReason',state.intent.selectionReason,'주제 선정 이유를 입력해 주세요.'],['intent.targetUser',state.intent.targetUser,'누구를 위한 작품인지 입력해 주세요.']].forEach((args) => require(...args))
     if (!state.intent.coreValues.length) errors['intent.coreValues'] = '중요 가치를 한 개 이상 선택해 주세요.'
-    if (state.basic.projectType === '생활 문제 해결형') {
-      require('intent.problemSituation',state.intent.problemSituation,'해결하고 싶은 문제를 입력해 주세요.')
-      require('intent.improvementDirection',state.intent.improvementDirection,'개선하고 싶은 내용을 입력해 주세요.')
-    }
   }
   if (step === 3) {
     if (!hasRow(state.features.requiredFeatures)) errors['features.requiredFeatures'] = '핵심 기능을 한 개 이상 입력해 주세요.'

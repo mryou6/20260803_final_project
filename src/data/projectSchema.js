@@ -56,7 +56,6 @@ export function createEmptyProject() {
       safetyAndPreparation: '',
       testPlans: [],
       finalCompletionCriteria: [],
-      problemSituation: '',
       targetUser: '',
       existingSolution: '',
       limitation: '',
@@ -78,7 +77,6 @@ export function createEmptyProject() {
       expectedProblems: [],
       solutions: [],
       safetyNotes: [],
-      improvement: '',
       otherParts: '',
     },
     aiInteraction: {
