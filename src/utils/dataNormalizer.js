@@ -117,7 +117,7 @@ export function normalizeProjectData(project = {}, id = '') {
     members: cleanList(project.members),
     oneLineSummary: cleanText(project.oneLineSummary, '작성된 소개가 없습니다.'),
     expectedDuration: cleanText(project.expectedDuration),
-    status: normalizeProjectStatus(project.status),
+    status: normalizeProjectStatus(project),
     currentStep,
     progress: Math.min(100, Math.max(0, Math.round(currentStep / 5 * 100))),
     planningData,

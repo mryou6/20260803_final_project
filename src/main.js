@@ -13,7 +13,7 @@ import { boards } from './data/boards.js'
 import { parts } from './data/parts.js'
 import { planSections } from './data/planSections.js'
 import { createId, escapeHtml } from './utils/helpers.js'
-import { PROJECT_STATUS_LABELS, isEditableProjectStatus, normalizeProjectStatus } from './constants/projectStatus.js'
+import { PROJECT_STATUS_LABELS, classifyStudentDashboardProjects, isEditableProjectStatus, normalizeProjectStatus } from './constants/projectStatus.js'
 import { validateStep } from './utils/validation.js'
 import { checkOpenAiConnection, reviewHardware, reviewPlanning } from './services/openaiService.js'
 import { downloadProjectPlanAsDocx } from './services/documentService.js'
@@ -105,13 +105,23 @@ function formatSavedTime(value) {
 }
 
 function renderStudentDashboard() {
-  const draftCards = myDrafts.length ? myDrafts.map((draft) => {
+  const {
+    draftProjects,
+    submittedProjects,
+    revisionProjects,
+    approvedProjects,
+    visibleSubmittedProjects,
+  } = classifyStudentDashboardProjects(myDrafts, myProjects)
+  const draftCards = draftProjects.length ? draftProjects.map((draft) => {
     const state = draft.formData?.projectState ?? {}
     const title = state.basic?.projectName?.trim() || '제목 없는 프로젝트'
+    const currentStep = Math.max(1, Number(draft.currentStep) || 1)
+    const progress = Math.min(100, Math.round(currentStep / 5 * 100))
     return `<article class="my-project-card draft-project-card">
       <div class="project-card-heading"><span class="project-status status-draft">작성 중</span><small>${formatSavedTime(draft.updatedAt)}</small></div>
       <h3>${escapeHtml(title)}</h3>
-      <div class="project-card-meta"><span>현재 ${Number(draft.currentStep) || 1}단계</span><span>마지막 저장 ${formatSavedTime(draft.updatedAt)}</span></div>
+      <div class="project-card-progress"><span style="width:${progress}%"></span></div>
+      <div class="project-card-meta"><span>현재 ${currentStep}단계 · ${progress}%</span><span>마지막 저장 ${formatSavedTime(draft.updatedAt)}</span></div>
       <div class="project-card-actions">
         <button class="button button-primary" type="button" data-action="continue-draft" data-draft-id="${draft.id}">이어서 작성</button>
         <button class="button project-delete-button" type="button" data-action="delete-draft" data-draft-id="${draft.id}">삭제</button>
@@ -119,8 +129,8 @@ function renderStudentDashboard() {
     </article>`
   }).join('') : '<p class="projects-empty">작성 중인 프로젝트가 없습니다.</p>'
 
-  const projectCards = myProjects.length ? myProjects.map((project) => {
-    const status = normalizeProjectStatus(project.status)
+  const projectCards = visibleSubmittedProjects.length ? visibleSubmittedProjects.map((project) => {
+    const status = project.status
     const actionLabel = status === 'revision_requested' ? '수정하기' : '내용 보기'
     return `<article class="my-project-card submitted-project-card">
       <div class="project-card-heading"><span class="project-status status-${escapeHtml(status)}">${statusLabels[status] ?? '상태 확인 필요'}</span><small>${formatSavedTime(project.submittedAt || project.updatedAt)}</small></div>
@@ -133,21 +143,17 @@ function renderStudentDashboard() {
     </article>`
   }).join('') : '<p class="projects-empty">제출한 프로젝트가 없습니다.</p>'
 
-  const waitingCount = myProjects.filter((item) => ['submitted', 'resubmitted'].includes(normalizeProjectStatus(item.status))).length
-  const revisionCount = myProjects.filter((item) => normalizeProjectStatus(item.status) === 'revision_requested').length
-  const approvedCount = myProjects.filter((item) => normalizeProjectStatus(item.status) === 'approved').length
-
   return `
     <section class="student-dashboard" aria-labelledby="my-projects-title">
       <div class="dashboard-heading"><div><p>STUDENT DASHBOARD</p><h1 id="my-projects-title">내 프로젝트</h1></div></div>
       <div class="project-status-summary" aria-label="프로젝트 상태 요약">
-        <div><strong>${myDrafts.length}</strong><span>작성 중</span></div><div><strong>${waitingCount}</strong><span>검토 대기</span></div><div><strong>${revisionCount}</strong><span>수정 요청</span></div><div><strong>${approvedCount}</strong><span>승인 완료</span></div>
+        <div><strong>${draftProjects.length}</strong><span>작성 중</span></div><div><strong>${submittedProjects.length}</strong><span>검토 대기</span></div><div><strong>${revisionProjects.length}</strong><span>수정 요청</span></div><div><strong>${approvedProjects.length}</strong><span>승인 완료</span></div>
       </div>
       <button class="button button-primary dashboard-create-button" type="button" data-action="new-project">+ 새 프로젝트 만들기</button>
       ${projectRouteMessage ? createNotice(projectRouteMessage, 'info') : ''}
       ${projectsLoading ? '<p class="projects-empty">프로젝트 목록을 불러오고 있습니다.</p>' : `
-        <section class="dashboard-project-group" aria-labelledby="draft-projects-title"><div class="project-group-heading"><h2 id="draft-projects-title">작성 중인 프로젝트</h2><span>${myDrafts.length}개</span></div><div class="my-project-grid">${draftCards}</div></section>
-        <section class="dashboard-project-group" aria-labelledby="submitted-projects-title"><div class="project-group-heading"><h2 id="submitted-projects-title">제출한 프로젝트</h2><span>${myProjects.length}개</span></div><div class="my-project-grid">${projectCards}</div></section>
+        <section class="dashboard-project-group" aria-labelledby="draft-projects-title"><div class="project-group-heading"><h2 id="draft-projects-title">작성 중인 프로젝트</h2><span>${draftProjects.length}개</span></div><div class="my-project-grid">${draftCards}</div></section>
+        <section class="dashboard-project-group" aria-labelledby="submitted-projects-title"><div class="project-group-heading"><h2 id="submitted-projects-title">제출한 프로젝트</h2><span>${visibleSubmittedProjects.length}개</span></div><div class="my-project-grid">${projectCards}</div></section>
       `}
     </section>
   `
@@ -319,6 +325,14 @@ async function refreshMyProjects() {
   else notice = projectResult.error
   if (draftResult.success) myDrafts = draftResult.data
   else notice = draftResult.error
+  const { legacyDraftProjects } = classifyStudentDashboardProjects(myDrafts, myProjects)
+  if (legacyDraftProjects.length) {
+    console.warn('[Legacy projects draft migration required]', legacyDraftProjects.map((project) => ({
+      id: project.id,
+      ownerId: project.ownerId,
+      status: project.status,
+    })))
+  }
   render()
   if (window.location.hash === '#my-projects-title') {
     window.requestAnimationFrame(() => document.querySelector('#my-projects-title')?.scrollIntoView({ block: 'start' }))
