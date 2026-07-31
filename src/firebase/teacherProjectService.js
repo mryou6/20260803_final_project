@@ -153,27 +153,33 @@ export function getTeacherDeleteErrorMessage(code) {
   return deleteErrorMessages[normalizeFirebaseErrorCode(code)] ?? '선택한 프로젝트를 삭제하지 못했습니다.'
 }
 
-export async function deleteProjectsForTeacher(projectIds, teacherUser) {
+export async function deleteProjectsForTeacher(selectedProjects, teacherUser) {
   if (!db || !teacherUser?.uid) {
-    return { success: false, deletedCount: 0, failedCount: 0, failedProjectIds: [], message: '교사 로그인 정보를 확인해 주세요.' }
+    return { success: false, deletedCount: 0, failedCount: 0, failedSelectionKeys: [], message: '교사 로그인 정보를 확인해 주세요.' }
   }
-  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : []).map((id) => text(id)).filter(Boolean))]
-  if (!ids.length) {
-    return { success: false, deletedCount: 0, failedCount: 0, failedProjectIds: [], message: '삭제할 프로젝트를 선택해 주세요.' }
+  const selections = (Array.isArray(selectedProjects) ? selectedProjects : []).filter((item) => item?.selectionKey)
+  if (!selections.length) {
+    return { success: false, deletedCount: 0, failedCount: 0, failedSelectionKeys: [], message: '삭제할 프로젝트를 선택해 주세요.' }
   }
   console.info('[Teacher Delete] 삭제 시작')
-  console.info('[Teacher Delete] 선택 문서 수:', ids.length)
+  const targets = selections.flatMap((item) => item.selectionSources?.length ? item.selectionSources : [{ sourceCollection: item.sourceCollection, documentId: item.documentId }])
+  console.info('[Teacher Delete] 선택 행 수:', selections.length)
+  console.table(targets.map((target) => {
+    const selection = selections.find((item) => (item.selectionSources ?? []).some((source) => source.sourceCollection === target.sourceCollection && source.documentId === target.documentId)
+      || (item.sourceCollection === target.sourceCollection && item.documentId === target.documentId))
+    return { sourceCollection: target.sourceCollection, documentId: target.documentId, title: selection?.title ?? '', status: selection?.status ?? '' }
+  }))
   try {
     const userSnapshot = await getDoc(doc(db, 'teachers', teacherUser.uid))
     if (!userSnapshot.exists() || userSnapshot.data()?.active !== true) {
       console.info('[Teacher Delete] Firebase 오류 code:', 'permission-denied')
       console.info('[Teacher Delete] 삭제 성공 수:', 0)
-      console.info('[Teacher Delete] 삭제 실패 수:', ids.length)
+      console.info('[Teacher Delete] 삭제 실패 수:', selections.length)
       return {
         success: false,
         deletedCount: 0,
-        failedCount: ids.length,
-        failedProjectIds: ids,
+        failedCount: selections.length,
+        failedSelectionKeys: selections.map((item) => item.selectionKey),
         errorCode: 'permission-denied',
         message: getTeacherDeleteErrorMessage('permission-denied'),
       }
@@ -182,33 +188,41 @@ export async function deleteProjectsForTeacher(projectIds, teacherUser) {
     const errorCode = normalizeFirebaseErrorCode(error?.code)
     console.info('[Teacher Delete] Firebase 오류 code:', errorCode || 'unknown')
     console.info('[Teacher Delete] 삭제 성공 수:', 0)
-    console.info('[Teacher Delete] 삭제 실패 수:', ids.length)
+    console.info('[Teacher Delete] 삭제 실패 수:', selections.length)
     return {
-      success: false, deletedCount: 0, failedCount: ids.length, failedProjectIds: ids,
+      success: false, deletedCount: 0, failedCount: selections.length, failedSelectionKeys: selections.map((item) => item.selectionKey),
       errorCode,
       message: getTeacherDeleteErrorMessage(errorCode),
     }
   }
 
   const results = []
-  for (const projectId of ids) {
-    try {
-      const deleted = await runTransaction(db, async (transaction) => {
-        const projectRef = doc(db, 'projects', projectId)
-        const snapshot = await transaction.get(projectRef)
-        if (!snapshot.exists()) return { deleted: false, errorCode: 'not-found' }
-        transaction.delete(projectRef)
-        return { deleted: true, errorCode: '' }
-      })
-      results.push({ projectId, ...deleted })
-    } catch (error) {
-      const errorCode = normalizeFirebaseErrorCode(error?.code)
-      results.push({ projectId, deleted: false, errorCode })
+  for (const selection of selections) {
+    const sources = selection.selectionSources?.length ? selection.selectionSources : [{ sourceCollection: selection.sourceCollection, documentId: selection.documentId }]
+    const sourceResults = []
+    for (const source of sources) {
+      if (!['drafts', 'projects'].includes(source.sourceCollection) || !source.documentId) {
+        sourceResults.push({ deleted: false, errorCode: 'invalid-argument' })
+        continue
+      }
+      try {
+        const deleted = await runTransaction(db, async (transaction) => {
+          const documentRef = doc(db, source.sourceCollection, source.documentId)
+          const snapshot = await transaction.get(documentRef)
+          if (!snapshot.exists()) return { deleted: true, errorCode: '' }
+          transaction.delete(documentRef)
+          return { deleted: true, errorCode: '' }
+        })
+        sourceResults.push(deleted)
+      } catch (error) {
+        sourceResults.push({ deleted: false, errorCode: normalizeFirebaseErrorCode(error?.code) })
+      }
     }
+    results.push({ selectionKey: selection.selectionKey, deleted: sourceResults.every((item) => item.deleted), errorCode: sourceResults.find((item) => !item.deleted)?.errorCode ?? '' })
   }
-  const failedProjectIds = results.filter((result) => !result.deleted).map((result) => result.projectId)
-  const deletedCount = results.length - failedProjectIds.length
-  const failedCount = failedProjectIds.length
+  const failedSelectionKeys = results.filter((result) => !result.deleted).map((result) => result.selectionKey)
+  const deletedCount = results.length - failedSelectionKeys.length
+  const failedCount = failedSelectionKeys.length
   const firstFailureCode = results.find((result) => !result.deleted)?.errorCode ?? ''
   if (failedCount) console.info('[Teacher Delete] Firebase 오류 code:', firstFailureCode || 'unknown')
   console.info('[Teacher Delete] 삭제 성공 수:', deletedCount)
@@ -217,7 +231,7 @@ export async function deleteProjectsForTeacher(projectIds, teacherUser) {
     success: failedCount === 0,
     deletedCount,
     failedCount,
-    failedProjectIds,
+    failedSelectionKeys,
     errorCode: firstFailureCode,
     message: deletedCount && failedCount
       ? `${deletedCount}개 프로젝트를 삭제했고, ${failedCount}개는 삭제하지 못했습니다.`

@@ -43,7 +43,7 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.status == "draft";
-      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isTeacher());
     }
 
     match /projects/{projectId} {

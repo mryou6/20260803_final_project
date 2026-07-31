@@ -82,6 +82,27 @@ export function normalizeTeacherDataRows(items = []) {
   })
 }
 
+export const projectSelectionKey = (project) => `${project.sourceCollection}:${project.id}`
+
+export function createProjectSelection(project) {
+  return {
+    selectionKey: projectSelectionKey(project), sourceCollection: project.sourceCollection,
+    documentId: project.id, title: project.projectName, status: project.status,
+    selectionSources: project.linkedDraftSources?.length
+      ? project.linkedDraftSources.map((source) => ({ sourceCollection: source.collection, documentId: source.documentId }))
+      : [{ sourceCollection: project.sourceCollection, documentId: project.id }],
+  }
+}
+
+export function toggleVisibleProjectSelections(selectedProjects, visibleItems, checked) {
+  visibleItems.forEach((project) => {
+    const value = createProjectSelection(project)
+    if (checked) selectedProjects.set(value.selectionKey, value)
+    else selectedProjects.delete(value.selectionKey)
+  })
+  return selectedProjects
+}
+
 const time = (value) => value?.getTime?.() ?? 0
 export function filterTeacherDataRows(rows, filters = {}) {
   const student = cleanText(filters.studentSearch).toLocaleLowerCase('ko')

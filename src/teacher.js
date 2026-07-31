@@ -11,7 +11,7 @@ import { createDeleteProjectsModal, trapDeleteModalFocus } from './components/de
 import { PROJECT_STATUS_LABELS, STATUS_CARD_FILTERS } from './constants/projectStatus.js'
 import { formatCurrency, formatDateTime } from './utils/dataNormalizer.js'
 import { normalizeProjectForOutput } from './utils/projectOutput.js'
-import { createTeacherDataCsv, filterTeacherDataRows, normalizeAndDeduplicateProjects, normalizeTeacherDataRows, sortGradeClasses } from './utils/teacherProjectTable.js'
+import { createProjectSelection, createTeacherDataCsv, filterTeacherDataRows, normalizeAndDeduplicateProjects, normalizeTeacherDataRows, projectSelectionKey, sortGradeClasses, toggleVisibleProjectSelections } from './utils/teacherProjectTable.js'
 
 const requestedStatus = new URLSearchParams(location.search).get('status')
 const filters = {
@@ -46,7 +46,7 @@ let deleteModalTrigger = null
 let dashboardNotice = null
 let projectsUnsubscribe = null
 let draftsUnsubscribe = null
-const selectedProjectIds = new Set()
+const selectedProjects = new Map()
 
 const unique = (key) => [...new Set(projects.map((project) => safe(project[key])).filter(Boolean))]
 const options = (items, label) => `<option value="all">${label}</option>${items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('')}`
@@ -99,15 +99,15 @@ function rows(items) {
             ? `<strong>학생 수정 완료</strong><span>재제출 ${formatDate(project.resubmittedAt)}</span><span>피드백 확인 ${formatDate(project.teacherReview?.studentReadAt)}</span>`
             : '검토 전')
         : project.status === 'approved' ? '승인 완료' : '-'
-    const isDraft = project.status === 'draft'
+    const selectionKey = projectSelectionKey(project)
     return `<tr class="project-row" tabindex="0" data-project-id="${escapeHtml(project.id)}" data-source="${project.sourceCollection}" aria-label="${escapeHtml(project.projectName)} 상세 보기">
-      <td>${isDraft ? '<span aria-label="읽기 전용">-</span>' : `<input type="checkbox" data-select-project="${escapeHtml(project.id)}" aria-label="${escapeHtml(project.projectName)} 프로젝트 선택" ${selectedProjectIds.has(project.id) ? 'checked' : ''}>`}</td>
+      <td><input type="checkbox" data-select-project data-selection-key="${escapeHtml(selectionKey)}" data-source-collection="${project.sourceCollection}" data-document-id="${escapeHtml(project.id)}" aria-label="${escapeHtml(project.projectName)} 프로젝트 선택" ${selectedProjects.has(selectionKey) ? 'checked' : ''}></td>
       <td>${escapeHtml(className)}</td><td>${people}</td>
       <td><strong>${escapeHtml(project.projectName)}</strong><span>${escapeHtml(project.oneLineSummary)}</span><span>${escapeHtml(project.board || '보드 미입력')}</span></td>
       <td><span class="step-chip">${project.currentStep}단계</span></td>
       <td><div class="table-progress"><span style="width:${project.progress}%"></span></div><small>${project.progress}%</small></td>
       <td>${project.aiCallCount}회</td><td><span class="teacher-status status-${project.status}">${statusLabels[project.status]}</span></td>
-      <td>${notification}</td><td>${formatDate(project.updatedAt)}</td><td><button type="button" class="row-view-button" ${isDraft ? `data-action="view-data-row" data-source="${project.sourceCollection}" data-document-id="${escapeHtml(project.id)}"` : `data-project-id="${escapeHtml(project.id)}"`}>보기</button></td>
+      <td>${notification}</td><td>${formatDate(project.updatedAt)}</td><td><button type="button" class="row-view-button" ${project.status === 'draft' ? `data-action="view-data-row" data-source="${project.sourceCollection}" data-document-id="${escapeHtml(project.id)}"` : `data-project-id="${escapeHtml(project.id)}"`}>보기</button></td>
     </tr>`
   }).join('')
 }
@@ -148,14 +148,14 @@ function renderResults() {
   if (body) body.innerHTML = rows(items)
   const selectAll = document.querySelector('[data-select-all]')
   if (selectAll) {
-    const selectedVisible = items.filter((project) => selectedProjectIds.has(project.id)).length
+    const selectedVisible = items.filter((project) => selectedProjects.has(projectSelectionKey(project))).length
     selectAll.checked = items.length > 0 && selectedVisible === items.length
     selectAll.indeterminate = selectedVisible > 0 && selectedVisible < items.length
   }
   const selectedCount = document.querySelector('[data-selected-count]')
-  if (selectedCount) selectedCount.textContent = `${selectedProjectIds.size}개 프로젝트 선택됨`
+  if (selectedCount) selectedCount.textContent = `${selectedProjects.size}개 프로젝트 선택됨`
   const deleteButton = document.querySelector('[data-action="open-project-delete"]')
-  if (deleteButton) deleteButton.disabled = selectedProjectIds.size === 0
+  if (deleteButton) deleteButton.disabled = selectedProjects.size === 0
   syncStatusControls()
 }
 
@@ -315,6 +315,9 @@ function closeDetails() {
 }
 
 const updateSearch = debounce((value) => { filters.search = value; renderResults() })
+function toggleSelectAllVisibleProjects(checked) {
+  toggleVisibleProjectSelections(selectedProjects, visibleProjects(), checked)
+}
 function syncReviewSelectAll(panel) {
   const selectAll = panel?.querySelector('[data-review-select-all]')
   const items = [...(panel?.querySelectorAll('.review-checklist input[name]') ?? [])]
@@ -349,13 +352,15 @@ document.addEventListener('change', (event) => {
     return
   }
   if (event.target.matches('[data-select-all]')) {
-    visibleProjects().forEach((project) => event.target.checked ? selectedProjectIds.add(project.id) : selectedProjectIds.delete(project.id))
+    toggleSelectAllVisibleProjects(event.target.checked)
     renderResults()
     return
   }
   if (event.target.matches('[data-select-project]')) {
-    const id = event.target.dataset.selectProject
-    event.target.checked ? selectedProjectIds.add(id) : selectedProjectIds.delete(id)
+    const key = event.target.dataset.selectionKey
+    const project = projects.find((item) => projectSelectionKey(item) === key)
+    if (event.target.checked && project) selectedProjects.set(key, createProjectSelection(project))
+    else selectedProjects.delete(key)
     renderResults()
     return
   }
@@ -386,7 +391,7 @@ document.addEventListener('click', async (event) => {
     return
   }
   if (action === 'open-project-delete') {
-    const selected = projects.filter((project) => selectedProjectIds.has(project.id))
+    const selected = [...selectedProjects.values()]
     if (!selected.length) return
     deleteModalTrigger = actionElement
     document.querySelector('#detail-root').insertAdjacentHTML('beforeend', createDeleteProjectsModal(selected))
@@ -406,8 +411,8 @@ document.addEventListener('click', async (event) => {
     actionElement.disabled = true
     actionElement.textContent = '삭제 중...'
     modal.querySelectorAll('button, input').forEach((control) => { control.disabled = true })
-    const deletingIds = [...selectedProjectIds]
-    const result = await deleteProjectsForTeacher(deletingIds, currentTeacher)
+    const deletingItems = [...selectedProjects.values()]
+    const result = await deleteProjectsForTeacher(deletingItems, currentTeacher)
     if (result.deletedCount === 0) {
       modal.querySelectorAll('button, input').forEach((control) => { control.disabled = false })
       actionElement.textContent = '영구 삭제'
@@ -416,11 +421,10 @@ document.addEventListener('click', async (event) => {
       if (resultElement) resultElement.textContent = result.message
       return
     }
-    const deletedIds = deletingIds.filter((id) => !result.failedProjectIds.includes(id))
-    projects = projects.filter((project) => !deletedIds.includes(project.id))
-    deletedIds.forEach((id) => selectedProjectIds.delete(id))
+    const deletedKeys = deletingItems.map((item) => item.selectionKey).filter((key) => !result.failedSelectionKeys.includes(key))
+    deletedKeys.forEach((key) => selectedProjects.delete(key))
     let detailWasDeleted = false
-    if (openDetailProjectId && deletedIds.includes(openDetailProjectId)) {
+    if (openDetailProjectId && deletingItems.some((item) => deletedKeys.includes(item.selectionKey) && item.documentId === openDetailProjectId)) {
       detailWasDeleted = true
       closeDetails()
     }
@@ -430,7 +434,7 @@ document.addEventListener('click', async (event) => {
       type: result.failedCount > 0 ? 'partial' : 'success',
       message: `${result.message}${detailWasDeleted ? ' 현재 보고 있던 프로젝트가 삭제되었습니다.' : ''}`,
     }
-    renderDashboard()
+    await loadProjects({ keepDashboard: true })
     return
   }
   if (action === 'teacher-logout') {
