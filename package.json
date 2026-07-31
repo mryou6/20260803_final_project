@@ -1,0 +1,21 @@
+{
+  "name": "20260803_final_project",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "netlify-cli": "^27.0.1",
+    "vite": "^8.1.1"
+  },
+  "dependencies": {
+    "docx": "^9.7.1",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
+    "openai": "^7.1.0"
+  }
+}

@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active == true;
+    }
+
+    function isOwner() {
+      return isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == "student";
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role;
+      allow delete: if false;
+    }
+
+    match /projects/{projectId} {
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == "draft";
+      allow read: if isSignedIn() && (isOwner() || isTeacher());
+
+      allow update: if isSignedIn() && (
+        (
+          isOwner()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && (
+            (resource.data.status in ["draft", "writing"]
+              && request.resource.data.status in ["draft", "submitted"])
+            ||
+            (resource.data.status in ["returned", "revision", "revisionRequested", "rejected", "revision_requested"]
+              && request.resource.data.status in ["revision_requested", "resubmitted"])
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "projectName", "teamName", "members", "oneLineSummary",
+            "expectedDuration", "currentStep", "progress", "planningData",
+            "aiInteraction", "processLog", "status", "updatedAt",
+            "submittedAt", "resubmittedAt", "resubmissionCount",
+            "revisionInProgress", "revisionStartedAt"
+          ])
+        )
+        ||
+        (
+          isOwner()
+          && resource.data.status in ["returned", "revision", "revisionRequested", "rejected", "revision_requested"]
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.teacherReview.studentRead == true
+          && request.resource.data.teacherReview.diff(resource.data.teacherReview).affectedKeys().hasOnly([
+            "studentRead", "studentReadAt"
+          ])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "teacherReview", "feedbackUnread", "revisionInProgress",
+            "revisionStartedAt", "updatedAt"
+          ])
+        )
+        ||
+        (
+          isTeacher()
+          && resource.data.status in ["submitted", "resubmitted", "returned", "revision_requested"]
+          && request.resource.data.status == "revision_requested"
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.teacherReview.status == request.resource.data.status
+          && request.resource.data.reviewHistory.size() <= 10
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "teacherReview", "lastTeacherFeedback", "reviewHistory",
+            "feedbackUnread", "revisionInProgress", "updatedAt"
+          ])
+        )
+        ||
+        (
+          isTeacher()
+          && resource.data.status in ["submitted", "resubmitted"]
+          && request.resource.data.status == "approved"
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "approvedAt", "approvedBy", "approvedByName", "updatedAt"
+          ])
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        isTeacher() || (isOwner() && resource.data.status == "draft")
+      );
+
+      match /reviewHistory/{reviewId} {
+        allow read: if isSignedIn()
+          && (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid || isTeacher());
+        allow create: if isTeacher()
+          || (
+            isSignedIn()
+            && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid
+            && request.resource.data.action == "resubmitted"
+            && request.resource.data.createdBy == request.auth.uid
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if request.resource.data.recipientId is string
+        && request.resource.data.projectId is string
+        && request.resource.data.read == false
+        && (
+          (
+            isTeacher()
+            && request.resource.data.type in ["revision_requested", "project_approved"]
+          )
+          ||
+          (
+            isSignedIn()
+            && request.resource.data.type == "project_resubmitted"
+            && get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.ownerId == request.auth.uid
+            && request.resource.data.recipientId
+              == get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.teacherReview.requestedBy
+          )
+        );
+      allow update: if isSignedIn()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.recipientId == resource.data.recipientId
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.read == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read", "readAt"]);
+      allow delete: if false;
+    }
+
+    match /teachers/{teacherId} {
+      allow read: if isSignedIn() && request.auth.uid == teacherId;
+      allow write: if false;
+    }
+  }
+}
