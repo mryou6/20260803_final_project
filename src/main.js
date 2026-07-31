@@ -15,6 +15,7 @@ import { planSections } from './data/planSections.js'
 import { createId, escapeHtml } from './utils/helpers.js'
 import { PROJECT_STATUS_LABELS, classifyStudentDashboardProjects, isEditableProjectStatus, normalizeProjectStatus, supplementDraftData } from './constants/projectStatus.js'
 import { validateStep } from './utils/validation.js'
+import { syncRoleAssignmentsWithTeamMembers as syncRoleAssignmentsState } from './utils/teamRoles.js'
 import { checkOpenAiConnection, reviewHardware, reviewPlanning } from './services/openaiService.js'
 import { downloadProjectPlanAsDocx } from './services/documentService.js'
 import { isFirebaseReady } from './firebase/firebaseConfig.js'
@@ -253,6 +254,8 @@ function render() {
   const app = document.querySelector('#app')
   if (!app) return
 
+  syncRoleAssignmentsWithTeamMembers()
+
   if (appView === 'connection') {
     app.innerHTML = createApiConnectionGate(connectionState)
     return
@@ -389,6 +392,7 @@ async function saveCurrentProject(successMessage = '프로젝트 기획안이 �
 function restoreDraftData(draft) {
   if (!draft?.formData?.projectState) return false
   projectState = draft.formData.projectState
+  syncRoleAssignmentsWithTeamMembers()
   restoreProcessLog(draft.formData.processLog)
   editorState = createEditorState({
     projectId: draft.projectId ?? projectState.projectId ?? null,
@@ -652,6 +656,13 @@ function getNestedValue(path) {
   return path.split('.').reduce((value, key) => value?.[key], projectState)
 }
 
+function syncRoleAssignmentsWithTeamMembers() {
+  projectState.production.memberRoles = syncRoleAssignmentsState(
+    projectState.basic.members,
+    projectState.production.memberRoles,
+  )
+}
+
 function updatePartField(element) {
   const part = projectState.hardware.parts.find((item) => item.id === element.dataset.partId)
   if (!part) return
@@ -667,7 +678,9 @@ function handleInput(event) {
   if (element.name === 'memberName') {
     const member = projectState.basic.members.find((item) => item.id === element.dataset.id)
     if (member) member.name = element.value
+    syncRoleAssignmentsWithTeamMembers()
     clearFieldError('basic.members', element)
+    if (event.type === 'change') render()
     return
   }
 
@@ -679,6 +692,10 @@ function handleInput(event) {
   if (element.dataset.rowPath) {
     const target = getNestedValue(element.dataset.rowPath)?.find((item) => item.id === element.dataset.id)
     if (target) target[element.dataset.rowField] = element.value
+    if (target && element.dataset.rowPath === 'production.memberRoles' && element.dataset.rowField === 'memberId') {
+      const member = projectState.basic.members.find((item) => item.id === element.value)
+      target.member = member?.name ?? ''
+    }
     delete validationErrors[element.dataset.rowPath]
     return
   }
@@ -823,18 +840,20 @@ async function handleClick(event) {
 
   if (action === 'add-member') {
     projectState.basic.members.push({ id: createId('member'), name: '' })
+    syncRoleAssignmentsWithTeamMembers()
     render()
   }
 
   if (action === 'remove-member') {
     projectState.basic.members = projectState.basic.members.filter((member) => member.id !== button.dataset.id)
+    syncRoleAssignmentsWithTeamMembers()
     render()
   }
 
   if (action === 'add-row') {
     const list = getNestedValue(button.dataset.path)
     const templates = {
-      'production.memberRoles': { member: '', roleTypes: [], roleType: '', customRole: '' },
+      'production.memberRoles': { memberId: '', member: '', roleTypes: [], roleType: '', customRole: '' },
       'production.schedule': { period: '', goal: '' },
       'production.difficultyPlans': { difficulty: '', solution: '' },
       'production.testPlans': { feature: '', method: '', successCondition: '' },

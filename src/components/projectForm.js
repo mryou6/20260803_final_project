@@ -21,26 +21,17 @@ function tableRows(path, rows, columns) {
   return `<div class="field field-wide structured-field"><div class="field-heading"><span>${columns.title} <b aria-hidden="true">*</b></span><button class="text-button" type="button" data-action="add-row" data-path="${path}">+ 행 추가</button></div><div class="structured-table"><div class="structured-head">${columns.fields.map((column) => `<span>${column.label}</span>`).join('')}<span></span></div>${rows.map((item) => `<div class="structured-row">${columns.fields.map((column) => `<input data-row-path="${path}" data-id="${item.id}" data-row-field="${column.key}" value="${escapeHtml(item[column.key])}" placeholder="${column.placeholder || column.label}"/>`).join('')}<button class="icon-button" type="button" data-action="remove-row" data-path="${path}" data-id="${item.id}" ${rows.length === 1 ? 'disabled' : ''}>삭제</button></div>`).join('')}</div><span class="error-slot">${error(path)}</span></div>`
 }
 
-function memberNames(value) {
-  const source = Array.isArray(value) ? value : String(value ?? '').split(',')
-  return [...new Set(source
-    .flatMap((item) => typeof item === 'string' ? item.split(',') : [item?.name ?? item?.memberName ?? item?.member])
-    .map((name) => String(name ?? '').trim())
-    .filter((name) => name
-      && !['null', 'undefined', '[object Object]'].includes(name)
-      && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name)
-      && !/^[A-Za-z0-9_-]{20,}$/.test(name)))]
+function renderMemberOptions(teamMembers, selectedMemberId = '') {
+  return teamMembers.map((member) => `<option value="${escapeHtml(member.id)}" ${member.id === selectedMemberId ? 'selected' : ''}>${escapeHtml(member.name)}</option>`).join('')
 }
 
 function renderMemberRoles(state) {
-  const members = memberNames(state.basic.members)
+  const members = state.basic.members.filter((member) => member.id && String(member.name ?? '').trim())
   return `<div class="field field-wide structured-field"><div class="field-heading"><span>팀원별 역할 분담 <b aria-hidden="true">*</b></span><button class="text-button" type="button" data-action="add-row" data-path="production.memberRoles">+ 행 추가</button></div>
     ${members.length ? '' : '<p class="field-guidance">1단계 기본 정보에서 팀원을 먼저 입력해 주세요.</p>'}
     <div class="structured-table"><div class="structured-head"><span>팀원</span><span>담당 역할</span><span></span></div>${state.production.memberRoles.map((item) => {
-      const current = String(item.member ?? '').trim()
-      const missing = current && !members.includes(current)
       const selectedRoles = Array.isArray(item.roleTypes) ? item.roleTypes : item.roleType ? [item.roleType] : []
-      return `<div class="structured-row role-assignment-row"><select data-row-path="production.memberRoles" data-id="${item.id}" data-row-field="member" ${members.length || missing ? '' : 'disabled'}><option value="">팀원 선택</option>${missing ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} - 현재 팀원 목록에 없음</option>` : ''}${members.map((name) => `<option value="${escapeHtml(name)}" ${current === name ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}</select><fieldset class="role-multi-select"><legend>담당 역할 선택</legend><div>${teamRoleOptions.map(([type,label]) => `<label class="${selectedRoles.includes(type) ? 'is-selected' : ''}"><input type="checkbox" data-action="toggle-team-role" data-id="${item.id}" value="${type}" ${selectedRoles.includes(type) ? 'checked' : ''}/><span>${label}</span></label>`).join('')}</div></fieldset><button class="icon-button" type="button" data-action="remove-row" data-path="production.memberRoles" data-id="${item.id}" ${state.production.memberRoles.length === 1 ? 'disabled' : ''}>삭제</button>${selectedRoles.includes('other') ? `<label class="custom-role-field"><span>기타 담당 역할</span><input data-row-path="production.memberRoles" data-id="${item.id}" data-row-field="customRole" value="${escapeHtml(item.customRole)}" placeholder="기타 역할을 입력하세요"/></label>` : ''}</div>`
+      return `<div class="structured-row role-assignment-row"><select data-row-path="production.memberRoles" data-id="${item.id}" data-row-field="memberId" ${members.length ? '' : 'disabled'}><option value="">팀원 선택</option>${renderMemberOptions(members, item.memberId)}</select><fieldset class="role-multi-select"><legend>담당 역할 선택</legend><div>${teamRoleOptions.map(([type,label]) => `<label class="${selectedRoles.includes(type) ? 'is-selected' : ''}"><input type="checkbox" data-action="toggle-team-role" data-id="${item.id}" value="${type}" ${selectedRoles.includes(type) ? 'checked' : ''}/><span>${label}</span></label>`).join('')}</div></fieldset><button class="icon-button" type="button" data-action="remove-row" data-path="production.memberRoles" data-id="${item.id}" ${state.production.memberRoles.length === 1 ? 'disabled' : ''}>삭제</button>${selectedRoles.includes('other') ? `<label class="custom-role-field"><span>기타 담당 역할</span><input data-row-path="production.memberRoles" data-id="${item.id}" data-row-field="customRole" value="${escapeHtml(item.customRole)}" placeholder="기타 역할을 입력하세요"/></label>` : ''}</div>`
     }).join('')}</div><span class="error-slot">${error('production.memberRoles')}</span></div>`
 }
 

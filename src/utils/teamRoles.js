@@ -25,12 +25,31 @@ export function normalizeTeamRole(item = {}) {
   const normalizedTypes = [...new Set([...savedTypes, ...mappedLegacyTypes, ...(knownType ? [knownType] : [])])]
   const roleTypesValue = normalizedTypes.length ? normalizedTypes : legacyRole ? ['other'] : []
   return {
+    memberId: String(typeof item === 'object' ? item?.memberId ?? '' : '').trim(),
     member: String(typeof item === 'object' ? item?.member ?? item?.memberName ?? item?.name ?? '' : '').trim(),
     roleTypes: roleTypesValue,
     roleType: roleTypesValue[0] ?? '',
     customRole: String(typeof item === 'object' ? item?.customRole ?? '' : '').trim()
       || (roleTypesValue.includes('other') && legacyRole && !mappedLegacyTypes.length && legacyRole !== '기타' ? legacyRole : ''),
   }
+}
+
+export function syncRoleAssignmentsWithTeamMembers(teamMembers = [], roleAssignments = []) {
+  const members = Array.isArray(teamMembers) ? teamMembers : []
+  members.forEach((member, index) => {
+    if (!member.id) member.id = `legacy-member-${index + 1}`
+  })
+  const validIds = new Set(members.map((member) => member.id).filter(Boolean))
+  const memberByName = new Map(members
+    .filter((member) => String(member.name ?? '').trim())
+    .map((member) => [String(member.name).trim(), member]))
+  return (Array.isArray(roleAssignments) ? roleAssignments : []).map((assignment) => {
+    const matchedByName = memberByName.get(String(assignment.member ?? assignment.memberName ?? '').trim())
+    const savedMemberId = String(assignment.memberId ?? '').trim()
+    const memberId = validIds.has(savedMemberId) ? savedMemberId : savedMemberId ? '' : matchedByName?.id ?? ''
+    const member = members.find((item) => item.id === memberId)
+    return { ...assignment, memberId, member: member ? String(member.name ?? '').trim() : '' }
+  })
 }
 
 export function getTeamRoleLabel(item = {}) {

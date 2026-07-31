@@ -43,7 +43,7 @@ export function createEditorProjectState() {
       pinConditions: '', undecidedParts: '',
     },
     production: {
-      memberRoles: [row('role', { member: '', roleTypes: [], roleType: '', customRole: '' })],
+      memberRoles: [row('role', { memberId: '', member: '', roleTypes: [], roleType: '', customRole: '' })],
       schedule: [row('schedule', { period: '', goal: '' })],
       difficultyPlans: [row('difficulty', { difficulty: '', solution: '' })],
       safetyAndPreparation: '',
@@ -70,6 +70,7 @@ export function toProjectDocument(state, processLog) {
   const operationSteps = values(state.features.operationSteps)
   const successCriteria = values(state.features.successCriteria)
   const memberRoles = stripIds(state.production.memberRoles).map((item) => ({
+    memberId: asText(item.memberId),
     memberName: asText(item.member),
     member: asText(item.member),
     roleTypes: asArray(item.roleTypes),
@@ -83,6 +84,7 @@ export function toProjectDocument(state, processLog) {
   const safetyAndPreparation = asText(state.production.safetyAndPreparation)
   const planningData = {
     formVersion: 2,
+    teamMembers: state.basic.members.map((member) => ({ id: asText(member.id), name: asText(member.name) })).filter((member) => member.name),
     projectType: state.basic.projectType,
     ideaDescription: state.intent.ideaDescription,
     selectionReason: state.intent.selectionReason,
@@ -194,7 +196,7 @@ const roleRows = (value) => {
       role: item?.role ?? item?.task ?? item?.responsibility,
     }))
   })
-  return rows.length ? rows : [row('role', { member: '', roleTypes: [], roleType: '', customRole: '' })]
+  return rows.length ? rows : [row('role', { memberId: '', member: '', roleTypes: [], roleType: '', customRole: '' })]
 }
 
 export function fromProjectDocument(documentData = {}) {
@@ -245,7 +247,9 @@ export function fromProjectDocument(documentData = {}) {
     basic: {
       ...state.basic, grade: asText(p.grade), className: asText(p.className), teamName: asText(documentData.teamName),
       authorName: originalOwnerName,
-      members: memberNames(documentData.members).length ? memberNames(documentData.members).map((name) => row('member', { name })) : state.basic.members,
+      members: asArray(p.teamMembers).length
+        ? p.teamMembers.map((member) => ({ id: asText(member.id) || createId('member'), name: asText(member.name) })).filter((member) => member.name)
+        : memberNames(documentData.members).length ? memberNames(documentData.members).map((name) => row('member', { name })) : state.basic.members,
       projectName: asText(documentData.projectName), summary: asText(documentData.oneLineSummary),
       duration: asText(documentData.expectedDuration), projectType: asText(p.projectType),
     },
