@@ -30,7 +30,11 @@ async function startStudentApp(user) {
   if (appInitialized) return
   appInitialized = true
   if (user) {
-    await saveOrUpdateUser(user)
+    const profileResult = await saveOrUpdateUser(user)
+    if (!profileResult.success) {
+      app.innerHTML = `<main class="auth-loading-screen"><p role="alert">${profileResult.error}</p></main>`
+      return
+    }
     await resolveUserRole(user)
   }
   const { initializeApp } = await import('./main.js')

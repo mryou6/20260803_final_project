@@ -8,7 +8,6 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
   runTransaction,
@@ -17,10 +16,8 @@ import {
 import { db } from './firebaseConfig.js'
 import { validateSubmissionData } from '../utils/projectValidation.js'
 import { sanitizeForFirestore } from '../utils/firestoreSanitizer.js'
-import { PROJECT_STATUSES, normalizeProjectStatus } from '../constants/projectStatus.js'
+import { normalizeProjectStatus } from '../constants/projectStatus.js'
 import { normalizeProjectData } from '../utils/dataNormalizer.js'
-
-const allowedStatuses = PROJECT_STATUSES
 
 const fail = (error) => ({ success: false, error })
 const errorMessages = {
@@ -36,75 +33,8 @@ function safeError(error, fallback = '프로젝트 저장 중 오류가 발생�
   return fail(errorMessages[error?.code] ?? fallback)
 }
 
-function devLog(message) {
-  if (!import.meta.env.DEV) return
-  console.info(message)
-}
-
 function validUser(user) {
   return Boolean(db && user?.uid)
-}
-
-export async function createProject(user, projectData) {
-  if (!validUser(user)) return fail('로그인 정보를 확인해 주세요.')
-
-  try {
-    devLog('[Firestore] 프로젝트 신규 생성 시작')
-    const projectRef = doc(collection(db, 'projects'))
-    const cleanData = sanitizeForFirestore(projectData)
-    await setDoc(projectRef, {
-      ...cleanData,
-      projectId: projectRef.id,
-      ownerId: user.uid,
-      ownerEmail: user.email ?? '',
-      ownerName: user.displayName ?? '',
-      status: 'draft',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      submittedAt: null,
-    })
-    devLog('[Firestore] 프로젝트 신규 생성 성공', projectRef.id)
-    return { success: true, projectId: projectRef.id }
-  } catch (error) {
-    return safeError(error)
-  }
-}
-
-export async function updateProject(projectId, user, projectData) {
-  if (!validUser(user) || !projectId) return fail('프로젝트 정보를 확인해 주세요.')
-
-  try {
-    devLog('[Firestore] 기존 프로젝트 업데이트 시작', projectId)
-    const projectRef = doc(db, 'projects', projectId)
-    const snapshot = await getDoc(projectRef)
-    if (!snapshot.exists()) return fail('프로젝트를 찾을 수 없습니다.')
-    const saved = snapshot.data()
-    if (saved.ownerId !== user.uid) return fail('이 프로젝트를 수정할 권한이 없습니다.')
-    const savedStatus = normalizeProjectStatus(saved.status)
-    if (!['draft', 'revision_requested'].includes(savedStatus)) return fail('작성 중이거나 수정 요청된 프로젝트만 수정할 수 있습니다.')
-
-    const cleanData = sanitizeForFirestore(projectData)
-    await updateDoc(projectRef, {
-      ...cleanData,
-      projectId,
-      ownerId: saved.ownerId,
-      ownerEmail: saved.ownerEmail,
-      ownerName: saved.ownerName,
-      status: allowedStatuses.includes(savedStatus) ? savedStatus : 'draft',
-      teacherReview: saved.teacherReview ?? null,
-      reviewHistory: saved.reviewHistory ?? [],
-      updatedAt: serverTimestamp(),
-      submittedAt: saved.submittedAt ?? null,
-      ...(savedStatus === 'revision_requested' ? {
-        revisionInProgress: true,
-        revisionStartedAt: saved.revisionStartedAt ?? serverTimestamp(),
-      } : {}),
-    })
-    devLog('[Firestore] 기존 프로젝트 업데이트 성공', projectId)
-    return { success: true, projectId }
-  } catch (error) {
-    return safeError(error)
-  }
 }
 
 export async function getMyProjects(uid) {
@@ -155,32 +85,46 @@ export async function getProjectById(projectId, uid) {
   }
 }
 
-export async function submitProject(projectId, user) {
-  if (!validUser(user) || !projectId) return fail('프로젝트 정보를 확인해 주세요.')
+export async function submitProject(projectId, user, projectData, draftId = null) {
+  if (!validUser(user)) return fail('프로젝트 정보를 확인해 주세요.')
+
+  const cleanProjectData = sanitizeForFirestore(projectData)
+  const missing = validateSubmissionData(cleanProjectData)
+  if (missing.length) return fail(`최종 제출 전 다음 항목을 작성해 주세요: ${missing.join(', ')}`)
 
   let failureStep = 'project-update'
-  let failurePath = `projects/${projectId}`
+  const projectRef = projectId ? doc(db, 'projects', projectId) : doc(collection(db, 'projects'))
+  const finalProjectId = projectRef.id
+  let failurePath = `projects/${finalProjectId}`
   try {
-    const projectRef = doc(db, 'projects', projectId)
-    const snapshot = await getDoc(projectRef)
-    if (!snapshot.exists()) return fail('재제출할 프로젝트를 찾을 수 없습니다.')
-    const data = snapshot.data()
-    if (data.ownerId !== user.uid) return fail('이 프로젝트를 제출할 권한이 없습니다.')
-    const currentStatus = normalizeProjectStatus(data.status)
-    if (!['draft', 'revision_requested'].includes(currentStatus)) {
+    const snapshot = projectId ? await getDoc(projectRef) : null
+    const data = snapshot?.exists() ? snapshot.data() : null
+    if (data && data.ownerId !== user.uid) return fail('이 프로젝트를 제출할 권한이 없습니다.')
+    const currentStatus = data ? normalizeProjectStatus(data.status) : null
+    if (data && currentStatus !== 'revision_requested') {
       return fail(currentStatus === 'approved' ? '승인 완료된 프로젝트는 다시 제출할 수 없습니다.' : '현재 상태에서는 재제출할 수 없습니다.')
     }
-    const missing = validateSubmissionData(data)
-    if (missing.length) return fail(`최종 제출 전 다음 항목을 작성해 주세요: ${missing.join(', ')}`)
 
     const wasReturned = currentStatus === 'revision_requested'
-    const teacherId = String(data.teacherReview?.requestedBy ?? data.teacherReview?.reviewedBy?.uid ?? '').trim()
+    const teacherId = String(data?.teacherReview?.requestedBy ?? data?.teacherReview?.reviewedBy?.uid ?? '').trim()
     const projectUpdatePayload = {
+      ...cleanProjectData,
+      ...(!data ? {
+        projectId: finalProjectId,
+        ownerId: user.uid,
+        ownerEmail: user.email ?? '',
+        ownerName: user.displayName ?? '',
+        createdAt: serverTimestamp(),
+      } : {}),
       status: wasReturned ? 'resubmitted' : 'submitted',
       submittedAt: serverTimestamp(),
       ...(wasReturned ? { resubmittedAt: serverTimestamp(), revisionInProgress: false } : {}),
       updatedAt: serverTimestamp(),
-      resubmissionCount: wasReturned ? Math.max(0, Number(data.resubmissionCount) || 0) + 1 : Math.max(0, Number(data.resubmissionCount) || 0),
+      resubmissionCount: wasReturned ? Math.max(0, Number(data?.resubmissionCount) || 0) + 1 : 0,
+      ...(wasReturned ? {
+        teacherReview: data.teacherReview ?? null,
+        reviewHistory: data.reviewHistory ?? [],
+      } : {}),
     }
     if (import.meta.env?.DEV && wasReturned) {
       console.debug('[학생 재제출 저장]', {
@@ -194,16 +138,17 @@ export async function submitProject(projectId, user) {
       })
     }
     await runTransaction(db, async (transaction) => {
-      const fresh = await transaction.get(projectRef)
-      if (!fresh.exists() || fresh.data().ownerId !== user.uid) throw Object.assign(new Error('permission-denied'), { code: 'permission-denied' })
-      if (normalizeProjectStatus(fresh.data().status) !== currentStatus) throw Object.assign(new Error('status-conflict'), { code: 'aborted' })
+      const fresh = data ? await transaction.get(projectRef) : null
+      if (data && (!fresh?.exists() || fresh.data().ownerId !== user.uid)) throw Object.assign(new Error('permission-denied'), { code: 'permission-denied' })
+      if (data && normalizeProjectStatus(fresh.data().status) !== currentStatus) throw Object.assign(new Error('status-conflict'), { code: 'aborted' })
       failureStep = 'project-update'
-      failurePath = `projects/${projectId}`
-      transaction.update(projectRef, projectUpdatePayload)
+      failurePath = `projects/${finalProjectId}`
+      if (data) transaction.update(projectRef, projectUpdatePayload)
+      else transaction.set(projectRef, projectUpdatePayload)
       if (wasReturned) {
         failureStep = 'review-history-create'
-        const historyRef = doc(collection(db, 'projects', projectId, 'reviewHistory'))
-        failurePath = `projects/${projectId}/reviewHistory/${historyRef.id}`
+        const historyRef = doc(collection(db, 'projects', finalProjectId, 'reviewHistory'))
+        failurePath = `projects/${finalProjectId}/reviewHistory/${historyRef.id}`
         transaction.set(historyRef, {
           action: 'resubmitted',
           actorType: 'student',
@@ -211,7 +156,7 @@ export async function submitProject(projectId, user) {
           actorName: user.displayName ?? '',
           createdBy: user.uid,
           createdAt: serverTimestamp(),
-          revisionNumber: Math.max(0, Number(data.teacherReview?.revisionCount) || 0),
+          revisionNumber: Math.max(0, Number(data?.teacherReview?.revisionCount) || 0),
         })
         if (teacherId) {
           failureStep = 'teacher-notification-create'
@@ -219,7 +164,7 @@ export async function submitProject(projectId, user) {
           failurePath = `notifications/${notificationRef.id}`
           transaction.set(notificationRef, {
             recipientId: teacherId,
-            projectId,
+            projectId: finalProjectId,
             type: 'project_resubmitted',
             title: '수정 기획안 재제출',
             message: '학생이 수정한 기획안을 다시 제출했습니다.',
@@ -228,10 +173,16 @@ export async function submitProject(projectId, user) {
           })
         }
       }
+      if (draftId) {
+        failureStep = 'draft-delete'
+        failurePath = `drafts/${draftId}`
+        transaction.delete(doc(db, 'drafts', draftId))
+      }
       failureStep = 'batch-commit'
     })
     return {
       success: true,
+      projectId: finalProjectId,
       wasReturned,
       message: wasReturned
         ? '수정한 프로젝트 기획안이 다시 제출되었습니다.'

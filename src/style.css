@@ -1091,13 +1091,92 @@ button:disabled {
   padding: 3.5rem 0 5rem;
 }
 
-.workspace.is-project-list-only > :not(.my-projects-section),
-.workspace.is-project-detail > .my-projects-section {
-  display: none;
+.student-dashboard-workspace {
+  width: min(100% - 3rem, 1180px);
+  padding-top: 2.25rem;
 }
 
-.workspace.is-project-list-only .my-projects-section {
-  margin-bottom: 0;
+.student-dashboard {
+  display: grid;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.dashboard-heading p {
+  margin: 0 0 0.35rem;
+  color: var(--orange);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.dashboard-heading h1 {
+  margin: 0;
+  color: var(--green-950);
+  font-size: clamp(1.8rem, 4vw, 2.7rem);
+  letter-spacing: -0.04em;
+}
+
+.project-status-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.project-status-summary > div {
+  display: flex;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  flex-direction: column;
+  background: white;
+}
+
+.project-status-summary strong {
+  color: var(--green-950);
+  font-size: 1.5rem;
+}
+
+.project-status-summary span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.dashboard-create-button {
+  justify-self: start;
+  min-height: 48px;
+}
+
+.dashboard-project-group {
+  min-width: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+
+.project-group-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.project-group-heading h2 {
+  margin: 0;
+  color: var(--green-950);
+  font-size: 1.15rem;
+}
+
+.project-group-heading span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.editor-top-actions {
+  margin-bottom: 1rem;
 }
 
 .student-project-actions {
@@ -1105,37 +1184,6 @@ button:disabled {
   justify-content: flex-end;
   gap: 0.6rem;
   margin-bottom: 1.4rem;
-}
-
-.my-projects-section {
-  margin-bottom: 2.5rem;
-  padding: clamp(1.1rem, 3vw, 1.6rem);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: white;
-  box-shadow: var(--shadow);
-}
-
-.my-projects-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.my-projects-heading p {
-  margin: 0 0 0.2rem;
-  color: var(--orange);
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-}
-
-.my-projects-heading h2 {
-  margin: 0;
-  color: var(--green-950);
-  font-size: 1.3rem;
 }
 
 .my-project-grid {
@@ -1872,6 +1920,81 @@ textarea:focus {
   }
 }
 
+@media (max-width: 768px) {
+  html,
+  body,
+  .app-shell {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .student-dashboard-workspace {
+    width: min(100% - 1.25rem, 1180px);
+    padding: 1.25rem 0 3rem;
+  }
+
+  .student-dashboard {
+    gap: 1rem;
+  }
+
+  .project-status-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .project-status-summary > div {
+    padding: 0.75rem;
+  }
+
+  .dashboard-create-button {
+    width: 100%;
+  }
+
+  .dashboard-project-group {
+    padding: 0.9rem;
+    border-radius: 14px;
+  }
+
+  .my-project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .my-project-card {
+    width: 100%;
+  }
+
+  .project-card-actions .button,
+  .editor-top-actions .button {
+    min-height: 46px;
+  }
+
+  .project-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .project-card-actions .button {
+    flex: 1 1 130px;
+  }
+
+  .editor-top-actions .button {
+    width: 100%;
+  }
+
+  .app-header {
+    gap: 1rem;
+    padding-block: 1.5rem;
+  }
+
+  .subtitle,
+  .workspace-heading > span {
+    line-height: 1.45;
+  }
+
+  .student-editor-workspace {
+    padding-top: 1.25rem;
+  }
+}
+
 @media (max-width: 520px) {
   .connection-gate {
     align-items: start;
@@ -1905,16 +2028,11 @@ textarea:focus {
 
   .student-project-actions {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .student-project-actions .button {
     padding-inline: 0.4rem;
-  }
-
-  .my-projects-heading {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .my-project-grid {

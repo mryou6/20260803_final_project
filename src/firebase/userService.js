@@ -1,5 +1,5 @@
 // 로그인 사용자의 공개 프로필만 users 컬렉션에 안전하게 저장합니다.
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { db } from './firebaseConfig.js'
 import { auth } from './firebaseConfig.js'
 import { getUserRole } from './roleService.js'
@@ -21,7 +21,7 @@ export async function saveOrUpdateUser(user) {
     }
 
     if (snapshot.exists()) {
-      await updateDoc(userRef, profile)
+      await setDoc(userRef, profile, { merge: true })
     } else {
       await setDoc(userRef, {
         uid: user.uid,
@@ -33,8 +33,8 @@ export async function saveOrUpdateUser(user) {
 
     return { success: true }
   } catch (error) {
-    if (import.meta.env.DEV) console.error('[Firestore] 실패 code:', error?.code ?? 'unknown')
-    return { success: false, error: '사용자 정보를 저장하지 못했습니다.' }
+    if (import.meta.env.DEV) console.error('[학생 계정 등록 실패]', { code: error?.code, message: error?.message })
+    return { success: false, error: '학생 계정 정보를 등록하지 못했습니다.' }
   }
 }
 

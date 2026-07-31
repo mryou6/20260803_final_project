@@ -16,22 +16,45 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isTeacher());
       allow create: if isSignedIn()
         && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(["uid", "role"])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.role == "student";
       allow update: if isSignedIn()
         && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(["uid", "role"])
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.role == resource.data.role;
       allow delete: if false;
     }
 
-    match /projects/{projectId} {
+    match /drafts/{draftId} {
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll([
+          "ownerId", "ownerEmail", "projectId", "currentStep",
+          "formData", "status", "createdAt", "updatedAt"
+        ])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status == "draft";
+      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.status == "draft";
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /projects/{projectId} {
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll(["ownerId", "status", "currentStep"])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == "submitted"
+        && !request.resource.data.keys().hasAny([
+          "approvedAt", "approvedBy", "approvedByName",
+          "teacherReview", "reviewHistory"
+        ]);
       allow read: if isSignedIn() && (isOwner() || isTeacher());
 
       allow update: if isSignedIn() && (

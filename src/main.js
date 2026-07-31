@@ -29,14 +29,13 @@ import { observeAuthState, signInWithGoogle, signOutUser } from './firebase/auth
 import { resolveUserRole, saveOrUpdateUser } from './firebase/userService.js'
 import { getUserRole } from './firebase/roleService.js'
 import {
-  createProject,
   deleteDraftProject,
   getMyProjects,
   getProjectById,
   submitProject,
-  updateProject,
   markTeacherFeedbackAsRead,
 } from './firebase/projectService.js'
+import { deleteDraft, getMyDrafts, loadDraft, saveDraft } from './firebase/draftService.js'
 import { validateSubmissionData } from './utils/projectValidation.js'
 import {
   createEditorProjectState,
@@ -71,14 +70,14 @@ let authUnsubscribe = null
 let validationErrors = {}
 let notice = ''
 let myProjects = []
+let myDrafts = []
 let projectsLoading = false
-const initialStudentParams = new URLSearchParams(window.location.search)
-let showProjectsOnly = isStudentPage && initialStudentParams.get('section') === 'projects'
 let projectRouteMessage = ''
-const PAGE_MODE = Object.freeze({ LIST: 'list', EDIT: 'edit', VIEW: 'view' })
-let currentPageMode = showProjectsOnly ? PAGE_MODE.LIST : PAGE_MODE.EDIT
+const PAGE_MODE = Object.freeze({ DASHBOARD: 'dashboard', CREATE: 'create', EDIT: 'edit', VIEW: 'view' })
+let currentPageMode = PAGE_MODE.DASHBOARD
 const createEditorState = (overrides = {}) => ({
   projectId: null,
+  draftId: null,
   isSaving: false,
   isSubmitting: false,
   isDownloading: false,
@@ -105,44 +104,51 @@ function formatSavedTime(value) {
   return iso ? new Intl.DateTimeFormat('ko-KR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso)) : '저장 기록 없음'
 }
 
-function renderMyProjects() {
-  const cards = projectsLoading
-    ? '<p class="projects-empty">프로젝트 목록을 불러오고 있습니다.</p>'
-    : myProjects.length
-      ? myProjects.map((project) => `
-          <article class="my-project-card" tabindex="0" role="button" data-action="open-project" data-project-id="${project.id}" aria-label="${escapeHtml(project.projectName || '이름 없는 프로젝트')} 열기">
-            <div class="project-card-heading">
-              <span class="project-status status-${escapeHtml(project.status || 'draft')}">${statusLabels[project.status] ?? '상태 확인 필요'}</span>
-              <small>${formatSavedTime(project.updatedAt)}</small>
-            </div>
-            <h3>${escapeHtml(project.projectName || '이름 없는 프로젝트')}</h3>
-            <p>${escapeHtml(project.teamName || '팀명 미입력')}</p>
-            <div class="project-card-progress"><span style="width:${Number(project.progress) || 0}%"></span></div>
-            <div class="project-card-meta"><span>${Number(project.currentStep) || 1}단계</span><span>${Number(project.progress) || 0}%</span></div>
-            ${project.status === 'revision_requested' ? (() => {
-              const notification = project.teacherReview?.notification ?? {}
-              return project.teacherReview?.studentRead === true
-                ? `<div class="project-notification is-read"><strong>수정 요청 · 읽음</strong><span>확인 ${formatSavedTime(notification.readAt)}</span></div>`
-                : `<div class="project-notification is-unread"><strong><i aria-hidden="true"></i> 새 수정 요청 · 읽지 않음</strong><span>요청 ${formatSavedTime(notification.createdAt || project.teacherReview?.reviewedAt)}</span></div>`
-            })() : ''}
-            ${project.status === 'approved' ? `<p class="project-review-highlight approved">승인 일시 · ${formatSavedTime(project.approvedAt || project.teacherReview?.reviewedAt)}</p>` : ''}
-            <div class="project-card-actions">
-              <button class="button button-secondary" type="button" data-action="open-project" data-project-id="${project.id}">${project.status === 'draft' ? '이어 작성' : project.status === 'revision_requested' ? project.teacherReview?.studentRead === true ? '기획안 수정하기' : '수정 요청 확인' : project.status === 'submitted' ? '제출 내용 보기' : project.status === 'resubmitted' ? '재제출 내용 보기' : '승인된 기획안 보기'}</button>
-              ${['submitted', 'resubmitted', 'approved'].includes(project.status) ? `<button class="button button-primary" type="button" data-action="download-project-docx" data-project-id="${project.id}">Word 다운로드</button>` : ''}
-              ${project.status === 'draft' ? `<button class="button project-delete-button" type="button" data-action="delete-project" data-project-id="${project.id}">삭제</button>` : ''}
-            </div>
-          </article>
-        `).join('')
-      : '<p class="projects-empty">저장된 프로젝트가 없습니다. 새 프로젝트를 만들어 보세요.</p>'
+function renderStudentDashboard() {
+  const draftCards = myDrafts.length ? myDrafts.map((draft) => {
+    const state = draft.formData?.projectState ?? {}
+    const title = state.basic?.projectName?.trim() || '제목 없는 프로젝트'
+    return `<article class="my-project-card draft-project-card">
+      <div class="project-card-heading"><span class="project-status status-draft">작성 중</span><small>${formatSavedTime(draft.updatedAt)}</small></div>
+      <h3>${escapeHtml(title)}</h3>
+      <div class="project-card-meta"><span>현재 ${Number(draft.currentStep) || 1}단계</span><span>마지막 저장 ${formatSavedTime(draft.updatedAt)}</span></div>
+      <div class="project-card-actions">
+        <button class="button button-primary" type="button" data-action="continue-draft" data-draft-id="${draft.id}">이어서 작성</button>
+        <button class="button project-delete-button" type="button" data-action="delete-draft" data-draft-id="${draft.id}">삭제</button>
+      </div>
+    </article>`
+  }).join('') : '<p class="projects-empty">작성 중인 프로젝트가 없습니다.</p>'
+
+  const projectCards = myProjects.length ? myProjects.map((project) => {
+    const status = normalizeProjectStatus(project.status)
+    const actionLabel = status === 'revision_requested' ? '수정하기' : '내용 보기'
+    return `<article class="my-project-card submitted-project-card">
+      <div class="project-card-heading"><span class="project-status status-${escapeHtml(status)}">${statusLabels[status] ?? '상태 확인 필요'}</span><small>${formatSavedTime(project.submittedAt || project.updatedAt)}</small></div>
+      <h3>${escapeHtml(project.projectName || '제목 없는 프로젝트')}</h3>
+      <p>${escapeHtml(project.teamName || '팀명 미입력')}</p>
+      <div class="project-card-actions">
+        <button class="button ${status === 'revision_requested' ? 'button-primary revision-action' : 'button-secondary'}" type="button" data-action="open-project" data-project-id="${project.id}">${actionLabel}</button>
+        ${['submitted', 'resubmitted', 'approved'].includes(status) ? `<button class="button button-download" type="button" data-action="download-project-docx" data-project-id="${project.id}">Word 다운로드</button>` : ''}
+      </div>
+    </article>`
+  }).join('') : '<p class="projects-empty">제출한 프로젝트가 없습니다.</p>'
+
+  const waitingCount = myProjects.filter((item) => ['submitted', 'resubmitted'].includes(normalizeProjectStatus(item.status))).length
+  const revisionCount = myProjects.filter((item) => normalizeProjectStatus(item.status) === 'revision_requested').length
+  const approvedCount = myProjects.filter((item) => normalizeProjectStatus(item.status) === 'approved').length
 
   return `
-    <section class="my-projects-section" aria-labelledby="my-projects-title">
-      <div class="my-projects-heading">
-        <div><p>MY PROJECTS</p><h2 id="my-projects-title">내 프로젝트</h2></div>
-        <button class="button button-primary" type="button" data-action="new-project">+ 새 프로젝트 만들기</button>
+    <section class="student-dashboard" aria-labelledby="my-projects-title">
+      <div class="dashboard-heading"><div><p>STUDENT DASHBOARD</p><h1 id="my-projects-title">내 프로젝트</h1></div></div>
+      <div class="project-status-summary" aria-label="프로젝트 상태 요약">
+        <div><strong>${myDrafts.length}</strong><span>작성 중</span></div><div><strong>${waitingCount}</strong><span>검토 대기</span></div><div><strong>${revisionCount}</strong><span>수정 요청</span></div><div><strong>${approvedCount}</strong><span>승인 완료</span></div>
       </div>
+      <button class="button button-primary dashboard-create-button" type="button" data-action="new-project">+ 새 프로젝트 만들기</button>
       ${projectRouteMessage ? createNotice(projectRouteMessage, 'info') : ''}
-      <div class="my-project-grid">${cards}</div>
+      ${projectsLoading ? '<p class="projects-empty">프로젝트 목록을 불러오고 있습니다.</p>' : `
+        <section class="dashboard-project-group" aria-labelledby="draft-projects-title"><div class="project-group-heading"><h2 id="draft-projects-title">작성 중인 프로젝트</h2><span>${myDrafts.length}개</span></div><div class="my-project-grid">${draftCards}</div></section>
+        <section class="dashboard-project-group" aria-labelledby="submitted-projects-title"><div class="project-group-heading"><h2 id="submitted-projects-title">제출한 프로젝트</h2><span>${myProjects.length}개</span></div><div class="my-project-grid">${projectCards}</div></section>
+      `}
     </section>
   `
 }
@@ -246,26 +252,25 @@ function render() {
   }
 
   const section = planSections[projectState.currentStep - 1]
+  const isDashboard = currentPageMode === PAGE_MODE.DASHBOARD
   app.innerHTML = `
     <div class="app-shell">
       <div class="student-context-bar">
         <a href="/index.html" class="context-home">Arduino Project Studio AI</a>
         <div class="student-profile">
-          ${
-            studentUser?.photoURL
-              ? `<img class="student-avatar-image" src="${escapeHtml(studentUser.photoURL)}" alt="${escapeHtml(studentUser.displayName || '사용자')} 프로필" referrerpolicy="no-referrer" />`
-              : `<span class="student-avatar">${escapeHtml(studentUser?.displayName?.charAt(0) || '학')}</span>`
-          }
+          ${studentUser?.photoURL
+            ? `<img class="student-avatar-image" src="${escapeHtml(studentUser.photoURL)}" alt="${escapeHtml(studentUser.displayName || '사용자')} 프로필" referrerpolicy="no-referrer" />`
+            : `<span class="student-avatar">${escapeHtml(studentUser?.displayName?.charAt(0) || '학')}</span>`}
           <div><strong>${escapeHtml(studentUser?.displayName || '학생 사용자')}</strong><span>${escapeHtml(studentUser?.email || '로그인 정보를 확인하고 있습니다.')}</span></div>
           <button class="student-logout-button" type="button" data-action="student-logout">로그아웃</button>
         </div>
       </div>
-      ${currentPageMode === PAGE_MODE.LIST ? '' : createHeader(projectState.currentStep, planSections.length, section.title)}
-      ${currentPageMode === PAGE_MODE.EDIT ? createStepNavigation(planSections, projectState.currentStep, projectState.maxVisitedStep) : ''}
-      <main class="workspace${currentPageMode === PAGE_MODE.LIST ? ' is-project-list-only' : ''}${currentPageMode === PAGE_MODE.VIEW ? ' is-project-detail' : ''}">
-        ${renderMyProjects()}
-        ${currentPageMode === PAGE_MODE.VIEW ? '<div class="view-mode-actions view-mode-actions-top"><button class="button button-secondary" type="button" data-action="return-projects">내 프로젝트 목록으로 돌아가기</button></div>' : ''}
-        ${projectState.currentStep !== 5 ? `<div class="student-project-actions" aria-label="학생 프로젝트 관리">
+      ${isDashboard ? '' : createHeader(projectState.currentStep, planSections.length, section.title)}
+      ${[PAGE_MODE.CREATE, PAGE_MODE.EDIT].includes(currentPageMode) ? createStepNavigation(planSections, projectState.currentStep, projectState.maxVisitedStep) : ''}
+      <main id="student-main" class="workspace ${isDashboard ? 'student-dashboard-workspace' : 'student-editor-workspace'}">
+        ${isDashboard ? renderStudentDashboard() : `
+        <div class="editor-top-actions"><button class="button button-secondary" type="button" data-action="return-projects">← 내 프로젝트로 돌아가기</button></div>
+        ${projectState.currentStep !== 5 && !editorState.viewMode ? `<div class="student-project-actions" aria-label="학생 프로젝트 관리">
           <button class="button button-secondary" type="button" data-action="save-draft" ${editorState.isSaving || isReadOnlyStatus(editorState.status) ? 'disabled' : ''}>${editorState.isSaving ? '저장 중...' : '임시 저장'}</button>
           <button class="button button-primary" type="button" data-action="submit-project" ${editorState.isSubmitting || isReadOnlyStatus(editorState.status) ? 'disabled' : ''}>${editorState.isSubmitting ? (editorState.status === 'revision_requested' ? '재제출 중...' : '제출 중...') : editorState.status === 'revision_requested' ? '수정 완료 및 재제출' : '최종 제출'}</button>
         </div>` : ''}
@@ -274,14 +279,10 @@ function render() {
         ${editorState.status === 'resubmitted' ? '<div class="submitted-notice">수정한 기획안을 교사에게 다시 제출했습니다. 재검토를 기다리고 있습니다.</div>' : ''}
         ${editorState.status === 'approved' ? '<div class="submitted-notice">교사가 승인한 최종 기획안입니다. 내용은 수정할 수 없습니다.</div>' : ''}
         ${createTeacherFeedbackCard(projectState)}
-        <section class="workspace-heading">
-          <p>STEP ${String(projectState.currentStep).padStart(2, '0')}</p>
-          <h2>${section.title}</h2>
-          <span>${projectState.currentStep === 5 ? '작성한 내용을 확인하고 저장·검토·다운로드·제출할 수 있습니다.' : '항목을 차근차근 작성해 주세요. * 표시는 필수 항목입니다.'}</span>
-        </section>
+        <section class="workspace-heading"><p>STEP ${String(projectState.currentStep).padStart(2, '0')}</p><h2>${section.title}</h2><span>${projectState.currentStep === 5 ? '작성한 내용을 확인하고 저장·검토·다운로드·제출할 수 있습니다.' : '항목을 차근차근 작성해 주세요. * 표시는 필수 항목입니다.'}</span></section>
         ${notice ? createNotice(notice, /저장되었습니다|제출되었습니다|불러왔습니다|삭제했습니다/.test(notice) ? 'success' : 'info') : ''}
         <div class="content-card">${renderStepContent()}</div>
-        ${renderActions()}
+        ${renderActions()}`}
       </main>
     </div>
   `
@@ -300,56 +301,77 @@ async function refreshMyProjects() {
   if (!studentUser?.uid) return
   projectsLoading = true
   render()
-  if (import.meta.env.DEV && currentPageMode === PAGE_MODE.LIST) {
+  if (import.meta.env.DEV && currentPageMode === PAGE_MODE.DASHBOARD) {
     console.debug('[학생 프로젝트 목록 렌더링]', {
       uid: studentUser?.uid,
       projectCount: myProjects?.length ?? 0,
       currentPageMode,
-      sectionVisible: Boolean(document.querySelector('.my-projects-section')),
+      sectionVisible: Boolean(document.querySelector('.student-dashboard')),
       currentUrl: window.location.href,
     })
   }
-  const result = await getMyProjects(studentUser.uid)
+  const [projectResult, draftResult] = await Promise.all([
+    getMyProjects(studentUser.uid),
+    getMyDrafts(studentUser),
+  ])
   projectsLoading = false
-  if (result.success) myProjects = result.data
-  else notice = result.error
+  if (projectResult.success) myProjects = projectResult.data
+  else notice = projectResult.error
+  if (draftResult.success) myDrafts = draftResult.data
+  else notice = draftResult.error
   render()
   if (window.location.hash === '#my-projects-title') {
     window.requestAnimationFrame(() => document.querySelector('#my-projects-title')?.scrollIntoView({ block: 'start' }))
   }
 }
 
-async function saveCurrentProject(successMessage = '프로젝트 기획안이 Firebase에 임시 저장되었습니다.') {
+async function saveCurrentProject(successMessage = '프로젝트 기획안이 임시 저장되었습니다.') {
   if (!studentUser?.uid || editorState.isSaving || isReadOnlyStatus(editorState.status)) return false
   editorState.isSaving = true
   notice = ''
   render()
   recordSavedAt()
-  const data = toProjectDocument(projectState, getProcessLog())
-  const result = editorState.projectId
-    ? await updateProject(editorState.projectId, studentUser, data)
-    : await createProject(studentUser, data)
+  const result = await saveDraft(studentUser, {
+    draftId: editorState.draftId,
+    projectId: editorState.projectId,
+    currentStep: projectState.currentStep,
+    formData: { projectState, processLog: getProcessLog() },
+  })
   editorState.isSaving = false
   if (!result.success) {
     notice = result.error
     render()
     return false
   }
-  editorState.projectId = result.projectId
-  projectState.projectId = result.projectId
-  projectState.status = editorState.status
-  editorState.lastSavedAt = new Date().toISOString()
+  editorState.draftId = result.draftId
+  if (!editorState.projectId && currentPageMode === PAGE_MODE.CREATE) {
+    currentPageMode = PAGE_MODE.EDIT
+    window.history.replaceState({}, '', `/student.html?draftId=${encodeURIComponent(result.draftId)}&mode=edit`)
+  }
+  editorState.lastSavedAt = result.savedAt
   projectState.savedAt = editorState.lastSavedAt
   notice = successMessage
-  await refreshMyProjects()
+  render()
+  return true
+}
+
+function restoreDraftData(draft) {
+  if (!draft?.formData?.projectState) return false
+  projectState = draft.formData.projectState
+  restoreProcessLog(draft.formData.processLog)
+  editorState = createEditorState({
+    projectId: draft.projectId ?? projectState.projectId ?? null,
+    draftId: draft.id,
+    lastSavedAt: timestampToIso(draft.updatedAt),
+    status: projectState.status ?? 'draft',
+  })
   return true
 }
 
 async function openStudentProject(projectId, { mode, updateUrl = true } = {}) {
   if (!projectId) {
     projectRouteMessage = '기획안과 프로젝트 정보를 찾을 수 없습니다.'
-    currentPageMode = PAGE_MODE.LIST
-    showProjectsOnly = true
+    currentPageMode = PAGE_MODE.DASHBOARD
     render()
     return false
   }
@@ -358,14 +380,13 @@ async function openStudentProject(projectId, { mode, updateUrl = true } = {}) {
   const result = await getProjectById(projectId, studentUser?.uid)
   if (!result.success) {
     projectRouteMessage = result.error || '기획안을 불러오지 못했습니다.'
-    currentPageMode = PAGE_MODE.LIST
-    showProjectsOnly = true
+    currentPageMode = PAGE_MODE.DASHBOARD
     render()
     return false
   }
 
   const status = normalizeProjectStatus(result.data.status)
-  const viewMode = mode === 'view' || !isEditableStatus(status)
+  const viewMode = mode === 'view' || status !== 'revision_requested'
   currentPageMode = viewMode ? PAGE_MODE.VIEW : PAGE_MODE.EDIT
   projectState = fromProjectDocument(result.data)
   restoreProcessLog(result.data.processLog)
@@ -381,7 +402,6 @@ async function openStudentProject(projectId, { mode, updateUrl = true } = {}) {
     projectState.currentStep = 5
     projectState.maxVisitedStep = 5
   }
-  showProjectsOnly = false
   projectRouteMessage = ''
   notice = status === 'approved'
     ? '승인 완료된 프로젝트입니다.'
@@ -395,6 +415,16 @@ async function openStudentProject(projectId, { mode, updateUrl = true } = {}) {
     window.history.pushState({}, '', `/student.html?projectId=${encodeURIComponent(result.data.id)}&mode=${nextMode}`)
   }
   render()
+
+  if (!viewMode) {
+    const draftResult = await loadDraft(studentUser, { projectId: result.data.id })
+    if (draftResult.success && restoreDraftData(draftResult.data)) {
+      editorState.projectId = result.data.id
+      editorState.status = status
+      notice = '임시저장한 작성 내용을 복구했습니다.'
+      render()
+    }
+  }
 
   if (status === 'revision_requested' && !viewMode) {
     markTeacherFeedbackAsRead(result.data.id, studentUser).then((readResult) => {
@@ -412,8 +442,7 @@ async function openStudentProject(projectId, { mode, updateUrl = true } = {}) {
 }
 
 async function showProjectList({ updateUrl = true } = {}) {
-  currentPageMode = PAGE_MODE.LIST
-  showProjectsOnly = true
+  currentPageMode = PAGE_MODE.DASHBOARD
   projectRouteMessage = ''
   notice = ''
   projectState = createInitialState()
@@ -425,8 +454,8 @@ async function showProjectList({ updateUrl = true } = {}) {
 
   if (updateUrl) {
     const url = new URL(window.location.href)
-    ;['projectId', 'mode', 'step', 'view', 'preview'].forEach((key) => url.searchParams.delete(key))
-    url.searchParams.set('section', 'projects')
+    ;['projectId', 'draftId', 'mode', 'step', 'view', 'preview'].forEach((key) => url.searchParams.delete(key))
+    url.searchParams.delete('section')
     window.history.pushState({}, '', url)
   }
   await refreshMyProjects()
@@ -435,22 +464,46 @@ async function showProjectList({ updateUrl = true } = {}) {
   })
 }
 
+function startNewProject({ updateUrl = true } = {}) {
+  projectState = createInitialState()
+  projectState.basic.authorName = studentUser?.displayName || ''
+  editorState = createEditorState({ projectId: null, draftId: null, lastSavedAt: null, status: 'draft' })
+  validationErrors = {}
+  projectRouteMessage = ''
+  notice = ''
+  currentPageMode = PAGE_MODE.CREATE
+  startSession()
+  recordStepVisit(1)
+  startStepTimer(1)
+  if (updateUrl) window.history.pushState({}, '', '/student.html?mode=create')
+  render()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 async function resolveStudentRoute() {
   if (!isStudentPage) return
   const params = new URLSearchParams(window.location.search)
   const projectId = params.get('projectId')
+  const draftId = params.get('draftId')
   const mode = params.get('mode')
   if (projectId && (mode === 'view' || mode === 'edit')) {
     await openStudentProject(projectId, { mode, updateUrl: false })
     return
   }
-  if (params.get('section') === 'projects') {
-    await showProjectList({ updateUrl: false })
+  if (draftId && mode === 'edit') {
+    const draftResult = await loadDraft(studentUser, { draftId })
+    if (draftResult.success && restoreDraftData(draftResult.data)) {
+      currentPageMode = PAGE_MODE.EDIT
+      render()
+      window.scrollTo({ top: 0 })
+      return
+    }
+  }
+  if (mode === 'create') {
+    startNewProject({ updateUrl: false })
     return
   }
-  currentPageMode = PAGE_MODE.EDIT
-  showProjectsOnly = false
-  render()
+  await showProjectList({ updateUrl: false })
 }
 
 function ensureAiInteraction() {
@@ -711,13 +764,13 @@ async function handleClick(event) {
 
   if (action === 'start-project' && canEnterProtectedPage(connectionState)) {
     if (connectionState.userRole?.role !== 'student') return
-    window.location.href = '/student.html'
+    window.location.href = '/student.html?mode=create'
     return
   }
 
   if (action === 'open-my-projects' && canEnterProtectedPage(connectionState)) {
     if (connectionState.userRole?.role !== 'student') return
-    window.location.href = '/student.html?section=projects'
+    window.location.href = '/student.html'
     return
   }
 
@@ -824,24 +877,36 @@ async function handleClick(event) {
   }
 
   if (action === 'new-project') {
-    if (!window.confirm('새 프로젝트를 시작할까요? 저장하지 않은 현재 입력 내용은 사라집니다.')) return
-    projectState = createInitialState()
-    projectState.basic.authorName = studentUser?.displayName || ''
-    editorState = createEditorState()
+    startNewProject()
+    return
+  }
+
+  if (action === 'continue-draft') {
+    const result = await loadDraft(studentUser, { draftId: button.dataset.draftId })
+    if (!result.success || !restoreDraftData(result.data)) {
+      projectRouteMessage = result.error || '임시저장 내용을 불러오지 못했습니다.'
+      render()
+      return
+    }
     currentPageMode = PAGE_MODE.EDIT
-    showProjectsOnly = false
-    window.history.pushState({}, '', '/student.html')
-    startSession()
-    recordStepVisit(1)
-    startStepTimer(1)
-    notice = ''
+    window.history.pushState({}, '', `/student.html?draftId=${encodeURIComponent(result.data.id)}&mode=edit`)
+    notice = '임시저장한 작성 내용을 복구했습니다.'
     render()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+
+  if (action === 'delete-draft') {
+    if (!window.confirm('작성 중인 프로젝트를 삭제할까요? 삭제한 내용은 복구할 수 없습니다.')) return
+    const result = await deleteDraft(button.dataset.draftId, studentUser)
+    projectRouteMessage = result.success ? '작성 중인 프로젝트를 삭제했습니다.' : result.error
+    await refreshMyProjects()
     return
   }
 
   if (action === 'open-project') {
     const listed = myProjects.find((project) => project.id === button.dataset.projectId)
-    const mode = listed && isEditableStatus(listed.status) ? 'edit' : 'view'
+    const mode = normalizeProjectStatus(listed?.status) === 'revision_requested' ? 'edit' : 'view'
     await openStudentProject(button.dataset.projectId, { mode })
     return
   }
@@ -920,13 +985,21 @@ async function handleClick(event) {
       render()
       return
     }
-    const result = await submitProject(editorState.projectId, studentUser)
+    const result = await submitProject(
+      editorState.projectId,
+      studentUser,
+      toProjectDocument(projectState, getProcessLog()),
+      editorState.draftId,
+    )
     editorState.isSubmitting = false
     if (!result.success) {
       notice = result.error
       render()
       return
     }
+    editorState.projectId = result.projectId
+    editorState.draftId = null
+    projectState.projectId = result.projectId
     editorState.status = result.wasReturned ? 'resubmitted' : 'submitted'
     projectState.status = editorState.status
     projectState.currentStep = 6
