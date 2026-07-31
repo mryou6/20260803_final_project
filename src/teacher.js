@@ -2,7 +2,7 @@ import './teacher.css'
 import { escapeHtml } from './utils/helpers.js'
 import { observeAuthState, signOutUser } from './firebase/auth.js'
 import { isCurrentUserTeacher } from './firebase/roleService.js'
-import { deleteProjectsForTeacher, getAllProjectsForTeacher, getProjectDetailForTeacher, getTeacherDashboardStats, subscribeAllProjectsForTeacher } from './firebase/teacherProjectService.js'
+import { deleteProjectsForTeacher, getAllDraftsForTeacher, getAllProjectsForTeacher, getProjectDetailForTeacher, getTeacherDashboardStats, subscribeAllDraftsForTeacher, subscribeAllProjectsForTeacher } from './firebase/teacherProjectService.js'
 import { fromProjectDocument } from './utils/projectMapper.js'
 import { downloadProjectPlanAsDocx } from './services/documentService.js'
 import { createTeacherReviewPanel, readTeacherReviewForm } from './components/teacherReviewPanel.js'
@@ -11,6 +11,7 @@ import { createDeleteProjectsModal, trapDeleteModalFocus } from './components/de
 import { PROJECT_STATUS_LABELS, STATUS_CARD_FILTERS } from './constants/projectStatus.js'
 import { formatCurrency, formatDateTime } from './utils/dataNormalizer.js'
 import { normalizeProjectForOutput } from './utils/projectOutput.js'
+import { createTeacherDataCsv, filterTeacherDataRows, normalizeTeacherDataRows } from './utils/teacherProjectTable.js'
 
 const requestedStatus = new URLSearchParams(location.search).get('status')
 const filters = {
@@ -18,6 +19,7 @@ const filters = {
   status: ['draft', 'submitted', 'revision_requested', 'resubmitted', 'approved'].includes(requestedStatus) ? requestedStatus : 'all',
   step: 'all', board: 'all', notification: 'all', search: '', sort: 'newest',
 }
+const dataTableFilters = { studentSearch: '', titleSearch: '', status: 'all', source: 'all', sort: 'saved' }
 const statusLabels = PROJECT_STATUS_LABELS
 const safe = (value, fallback = '') => {
   if (value === undefined || value === null || typeof value === 'object') return fallback
@@ -34,6 +36,7 @@ const debounce = (callback, delay = 180) => {
 
 let currentTeacher
 let projects = []
+let drafts = []
 let initialized = false
 let permissionPending = false
 let lastDetailTrigger
@@ -41,6 +44,7 @@ let openDetailProjectId = null
 let deleteModalTrigger = null
 let dashboardNotice = null
 let projectsUnsubscribe = null
+let draftsUnsubscribe = null
 const selectedProjectIds = new Set()
 
 const unique = (key) => [...new Set(projects.map((project) => safe(project[key])).filter(Boolean))]
@@ -149,6 +153,33 @@ function renderResults() {
   syncStatusControls()
 }
 
+const allProjectDataRows = () => normalizeTeacherDataRows(drafts, projects)
+const visibleProjectDataRows = () => filterTeacherDataRows(allProjectDataRows(), dataTableFilters)
+
+function dataTableRows(items) {
+  if (!items.length) return '<tr><td class="teacher-empty" colspan="12">현재 조건에 해당하는 데이터가 없습니다.</td></tr>'
+  return items.map((item) => `<tr>
+    <td>${item.sourceLabel}</td><td>${escapeHtml(item.studentName)}</td><td>${escapeHtml(item.studentEmail || '-')}</td>
+    <td><strong>${escapeHtml(item.title)}</strong></td><td><span class="teacher-status status-${escapeHtml(item.status)}">${escapeHtml(item.statusLabel)}</span></td>
+    <td>${item.currentStep}단계</td><td>${item.progress}%</td><td>${formatDate(item.updatedAt)}</td>
+    <td>${formatDate(item.submittedAt)}</td><td>${formatDate(item.approvedAt)}</td><td><code>${escapeHtml(item.documentId)}</code></td>
+    <td><button class="row-view-button" type="button" data-action="view-data-row" data-source="${item.source}" data-document-id="${escapeHtml(item.documentId)}">상세 보기</button></td>
+  </tr>`).join('')
+}
+
+function renderProjectDataResults() {
+  const items = visibleProjectDataRows()
+  const root = document.querySelector('[data-project-data-table]')
+  if (!root) return
+  root.querySelector('tbody').innerHTML = dataTableRows(items)
+  root.querySelector('[data-project-data-meta]').textContent = `전체 ${allProjectDataRows().length}개 중 ${items.length}개 표시`
+  const count = (status) => items.filter((item) => item.status === status).length
+  root.querySelector('[data-project-data-stats]').innerHTML = [
+    ['전체', items.length], ['작성 중', count('draft')], ['검토 대기', count('submitted')],
+    ['수정 요청', count('revision_requested')], ['승인 완료', count('approved')],
+  ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('')
+}
+
 function renderDashboard() {
   const stats = getTeacherDashboardStats(projects)
   document.querySelector('#teacher-app').innerHTML = `<div class="teacher-shell">
@@ -180,9 +211,16 @@ function renderDashboard() {
         <select data-filter="sort" aria-label="정렬"><option value="newest">최근 저장순</option><option value="oldest">오래된 저장순</option><option value="progress-desc">진행률 높은순</option><option value="progress-asc">진행률 낮은순</option><option value="name">프로젝트명 가나다순</option><option value="status">제출 상태순</option></select>
       </div><div class="selection-toolbar"><label><input type="checkbox" data-select-all aria-label="현재 표시된 프로젝트 전체 선택"> 현재 결과 전체 선택</label><span data-selected-count>0개 프로젝트 선택됨</span><button class="button button-danger" type="button" data-action="open-project-delete" disabled>선택 삭제</button></div>
       <div class="result-meta"></div><div class="table-wrap"><table><thead><tr><th><span class="sr-only">선택</span></th><th>학년·반</th><th>학생 또는 팀</th><th>프로젝트명 / 소개 / 보드</th><th>현재 단계</th><th>진행률</th><th>AI 호출</th><th>제출 상태</th><th>피드백 확인</th><th>최종 저장</th><th>보기</th></tr></thead><tbody></tbody></table></div></section>
+      <section class="teacher-content project-data-section" data-project-data-table><div class="project-data-heading"><div><p>FIRESTORE DATA</p><h2>전체 프로젝트 데이터</h2><span>drafts와 projects 컬렉션을 읽기 전용 표로 확인합니다.</span></div><button class="button button-primary" type="button" data-action="download-project-data-csv">CSV 다운로드</button></div>
+        <div class="project-data-stats" data-project-data-stats></div>
+        <div class="project-data-filters"><input type="search" data-data-filter="studentSearch" placeholder="학생 이름 또는 이메일 검색"><input type="search" data-data-filter="titleSearch" placeholder="프로젝트 제목 검색"><select data-data-filter="status"><option value="all">전체 상태</option><option value="draft">작성 중</option><option value="submitted">검토 대기</option><option value="revision_requested">수정 요청</option><option value="approved">승인 완료</option></select><select data-data-filter="source"><option value="all">전체 컬렉션</option><option value="drafts">drafts · 임시저장</option><option value="projects">projects · 제출</option></select><select data-data-filter="sort"><option value="saved">최근 저장순</option><option value="submitted">최근 제출순</option><option value="student">학생 이름순</option><option value="title">프로젝트 제목순</option></select></div>
+        <div class="result-meta" data-project-data-meta></div><div class="table-wrap project-data-table-wrap"><table><thead><tr><th>구분</th><th>학생 이름</th><th>학생 이메일</th><th>프로젝트 제목</th><th>상태</th><th>현재 단계</th><th>진행률</th><th>마지막 저장일</th><th>제출일</th><th>승인일</th><th>문서 ID</th><th>상세 보기</th></tr></thead><tbody></tbody></table></div>
+      </section>
     </main></div>`
   Object.entries(filters).forEach(([key, value]) => { const control = document.querySelector(`[data-filter="${key}"]`); if (control) control.value = value })
+  Object.entries(dataTableFilters).forEach(([key, value]) => { const control = document.querySelector(`[data-data-filter="${key}"]`); if (control) control.value = value })
   renderResults()
+  renderProjectDataResults()
 }
 
 function renderState(message, action = '', spinner = true) {
@@ -193,12 +231,14 @@ async function loadProjects({ keepDashboard = false } = {}) {
   const button = document.querySelector('[data-action="refresh"]')
   if (button) { button.disabled = true; button.textContent = '불러오는 중...' }
   if (!keepDashboard) renderState('학생 프로젝트를 불러오고 있습니다.')
-  const result = await getAllProjectsForTeacher()
+  const [result, draftResult] = await Promise.all([getAllProjectsForTeacher(), getAllDraftsForTeacher()])
   if (!result.success) {
     renderState(result.error, '<button class="button button-primary" type="button" data-action="retry-projects">다시 시도</button>', false)
     return
   }
   projects = result.projects
+  drafts = draftResult.success ? draftResult.drafts : []
+  if (!draftResult.success) dashboardNotice = { type: 'error', message: draftResult.error }
   renderDashboard()
   if (!projectsUnsubscribe) {
     projectsUnsubscribe = subscribeAllProjectsForTeacher(
@@ -211,6 +251,12 @@ async function loadProjects({ keepDashboard = false } = {}) {
         dashboardNotice = { type: 'error', message: error.error }
         renderDashboard()
       },
+    )
+  }
+  if (!draftsUnsubscribe) {
+    draftsUnsubscribe = subscribeAllDraftsForTeacher(
+      (nextDrafts) => { drafts = nextDrafts; renderDashboard() },
+      (error) => { dashboardNotice = { type: 'error', message: error.error }; renderDashboard() },
     )
   }
   if (location.hash === '#submission-status') requestAnimationFrame(() => document.querySelector('#submission-status')?.scrollIntoView({ block: 'center' }))
@@ -277,6 +323,11 @@ document.addEventListener('input', (event) => {
     return
   }
   if (event.target.dataset.filter === 'search') updateSearch(event.target.value)
+  const dataFilter = event.target.dataset.dataFilter
+  if (dataFilter && ['studentSearch', 'titleSearch'].includes(dataFilter)) {
+    dataTableFilters[dataFilter] = event.target.value
+    renderProjectDataResults()
+  }
 })
 document.addEventListener('change', (event) => {
   if (event.target.matches('[data-review-select-all]')) {
@@ -298,6 +349,11 @@ document.addEventListener('change', (event) => {
     const id = event.target.dataset.selectProject
     event.target.checked ? selectedProjectIds.add(id) : selectedProjectIds.delete(id)
     renderResults()
+    return
+  }
+  if (event.target.dataset.dataFilter) {
+    dataTableFilters[event.target.dataset.dataFilter] = event.target.value
+    renderProjectDataResults()
     return
   }
   const key = event.target.dataset.filter
@@ -373,6 +429,8 @@ document.addEventListener('click', async (event) => {
     actionElement.disabled = true
     projectsUnsubscribe?.()
     projectsUnsubscribe = null
+    draftsUnsubscribe?.()
+    draftsUnsubscribe = null
     const result = await signOutUser()
     if (result.success) location.replace('/index.html')
     else {
@@ -383,6 +441,24 @@ document.addEventListener('click', async (event) => {
     return
   }
   if (action === 'refresh' || action === 'retry-projects') { await loadProjects({ keepDashboard: true }); return }
+  if (action === 'download-project-data-csv') {
+    const csv = createTeacherDataCsv(visibleProjectDataRows(), (value) => value ? formatDate(value) : '')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
+    link.href = url
+    link.download = `arduino-projects-${today}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    return
+  }
+  if (action === 'view-data-row') {
+    const item = allProjectDataRows().find((row) => row.source === actionElement.dataset.source && row.documentId === actionElement.dataset.documentId)
+    if (!item) return
+    document.querySelector('#detail-root').innerHTML = `<div class="detail-backdrop" data-action="close-detail"><aside class="detail-panel project-data-detail" role="dialog" aria-modal="true" aria-labelledby="data-detail-title"><div class="detail-header"><div><p>${escapeHtml(item.sourceLabel)}</p><h2 id="data-detail-title">${escapeHtml(item.title)}</h2><span>${escapeHtml(item.studentName)} · ${escapeHtml(item.studentEmail || '-')}</span></div><button type="button" class="detail-close" data-action="close-detail" aria-label="닫기">×</button></div><div class="detail-body">${section('읽기 전용 데이터', [field('상태', item.statusLabel), field('현재 단계', `${item.currentStep}단계`), field('진행률', `${item.progress}%`), field('마지막 저장일', formatDate(item.updatedAt)), field('제출일', formatDate(item.submittedAt)), field('승인일', formatDate(item.approvedAt)), field('컬렉션', item.source), field('문서 ID', item.documentId)])}</div></aside></div>`
+    document.body.classList.add('detail-open')
+    return
+  }
   if (action === 'retry-auth') { permissionPending = false; await initializeTeacher(currentTeacher); return }
   if (action === 'close-detail' && (event.target === actionElement || event.target.closest('.detail-close'))) { closeDetails(); return }
   if (action === 'download-docx') {

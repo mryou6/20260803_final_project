@@ -49,6 +49,25 @@ export async function getAllProjectsForTeacher() {
   }
 }
 
+export async function getAllDraftsForTeacher() {
+  if (!db) return { success: false, errorCode: 'firebase-unavailable', error: 'Firebase 연결 정보를 확인해 주세요.' }
+  try {
+    const snapshot = await getDocs(collection(db, 'drafts'))
+    return { success: true, drafts: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }
+  } catch (error) {
+    return errorResult(error, '학생 임시저장 데이터를 불러오지 못했습니다.')
+  }
+}
+
+export function subscribeAllDraftsForTeacher(onDrafts, onError) {
+  if (!db) return () => {}
+  return onSnapshot(
+    collection(db, 'drafts'),
+    (snapshot) => onDrafts(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+    (error) => onError?.(errorResult(error, '학생 임시저장 실시간 업데이트를 불러오지 못했습니다.')),
+  )
+}
+
 export function subscribeAllProjectsForTeacher(onProjects, onError) {
   if (!db) return () => {}
   return onSnapshot(

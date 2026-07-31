@@ -38,7 +38,7 @@ service cloud.firestore {
         ])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status == "draft";
-      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isTeacher());
       allow update: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId

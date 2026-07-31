@@ -271,6 +271,90 @@ button,
   box-shadow: 0 14px 40px rgb(12 38 53 / 5%);
 }
 
+.project-data-section {
+  margin-top: 1.25rem;
+}
+
+.project-data-heading {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.project-data-heading p {
+  margin: 0 0 0.25rem;
+  color: var(--teal);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.project-data-heading h2 {
+  margin: 0;
+  color: #18333e;
+  font-size: 1.25rem;
+}
+
+.project-data-heading span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.project-data-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.project-data-stats div {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: #f6f8f9;
+}
+
+.project-data-stats span,
+.project-data-stats strong {
+  display: block;
+}
+
+.project-data-stats span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.project-data-stats strong {
+  margin-top: 0.15rem;
+  color: #18333e;
+  font-size: 1.15rem;
+}
+
+.project-data-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) repeat(3, minmax(130px, 0.7fr));
+  gap: 0.65rem;
+}
+
+.project-data-filters input,
+.project-data-filters select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 0.75rem;
+  border: 1px solid #d4dfe2;
+  border-radius: 9px;
+  background: #fbfcfd;
+}
+
+.project-data-table-wrap table {
+  min-width: 1450px;
+}
+
+.project-data-table-wrap code {
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .teacher-toast {
   margin-top: 1rem;
   padding: 0.85rem 1rem;
@@ -914,6 +998,10 @@ td small {
   .teacher-search {
     grid-column: 1 / -1;
   }
+
+  .project-data-filters {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 600px) {
@@ -941,6 +1029,7 @@ td small {
   }
 
   .filter-bar,
+  .project-data-filters,
   .idea-compare,
   .suggestion-grid {
     grid-template-columns: 1fr;
@@ -948,6 +1037,19 @@ td small {
 
   .teacher-search {
     grid-column: auto;
+  }
+
+
+  .project-data-heading {
+    flex-direction: column;
+  }
+
+  .project-data-heading .button {
+    width: 100%;
+  }
+
+  .project-data-stats {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .detail-grid {
