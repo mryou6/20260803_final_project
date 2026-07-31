@@ -11,7 +11,7 @@ import { createDeleteProjectsModal, trapDeleteModalFocus } from './components/de
 import { PROJECT_STATUS_LABELS, STATUS_CARD_FILTERS } from './constants/projectStatus.js'
 import { formatCurrency, formatDateTime } from './utils/dataNormalizer.js'
 import { normalizeProjectForOutput } from './utils/projectOutput.js'
-import { createTeacherDataCsv, filterTeacherDataRows, normalizeTeacherDataRows } from './utils/teacherProjectTable.js'
+import { createTeacherDataCsv, filterTeacherDataRows, normalizeAndDeduplicateProjects, normalizeTeacherDataRows, sortGradeClasses } from './utils/teacherProjectTable.js'
 
 const requestedStatus = new URLSearchParams(location.search).get('status')
 const filters = {
@@ -37,6 +37,7 @@ const debounce = (callback, delay = 180) => {
 let currentTeacher
 let projects = []
 let drafts = []
+let projectDocuments = []
 let initialized = false
 let permissionPending = false
 let lastDetailTrigger
@@ -49,7 +50,11 @@ const selectedProjectIds = new Set()
 
 const unique = (key) => [...new Set(projects.map((project) => safe(project[key])).filter(Boolean))]
 const options = (items, label) => `<option value="all">${label}</option>${items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('')}`
-const classroomOptions = () => `<option value="all">전체 학급</option>${unique('classroomKey').map((key) => {
+const classroomOptions = () => `<option value="all">전체 학급</option>${unique('classroomKey').sort((a, b) => {
+  const [gradeA, classA] = a.split('|')
+  const [gradeB, classB] = b.split('|')
+  return sortGradeClasses(`${gradeA}학년 ${classA}반`, `${gradeB}학년 ${classB}반`)
+}).map((key) => {
   const [grade, className] = key.split('|')
   const label = [grade && `${grade}학년`, className && `${className}반`].filter(Boolean).join(' ')
   return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`
@@ -94,14 +99,15 @@ function rows(items) {
             ? `<strong>학생 수정 완료</strong><span>재제출 ${formatDate(project.resubmittedAt)}</span><span>피드백 확인 ${formatDate(project.teacherReview?.studentReadAt)}</span>`
             : '검토 전')
         : project.status === 'approved' ? '승인 완료' : '-'
-    return `<tr class="project-row" tabindex="0" data-project-id="${escapeHtml(project.id)}" aria-label="${escapeHtml(project.projectName)} 상세 보기">
-      <td><input type="checkbox" data-select-project="${escapeHtml(project.id)}" aria-label="${escapeHtml(project.projectName)} 프로젝트 선택" ${selectedProjectIds.has(project.id) ? 'checked' : ''}></td>
+    const isDraft = project.status === 'draft'
+    return `<tr class="project-row" tabindex="0" data-project-id="${escapeHtml(project.id)}" data-source="${project.sourceCollection}" aria-label="${escapeHtml(project.projectName)} 상세 보기">
+      <td>${isDraft ? '<span aria-label="읽기 전용">-</span>' : `<input type="checkbox" data-select-project="${escapeHtml(project.id)}" aria-label="${escapeHtml(project.projectName)} 프로젝트 선택" ${selectedProjectIds.has(project.id) ? 'checked' : ''}>`}</td>
       <td>${escapeHtml(className)}</td><td>${people}</td>
       <td><strong>${escapeHtml(project.projectName)}</strong><span>${escapeHtml(project.oneLineSummary)}</span><span>${escapeHtml(project.board || '보드 미입력')}</span></td>
       <td><span class="step-chip">${project.currentStep}단계</span></td>
       <td><div class="table-progress"><span style="width:${project.progress}%"></span></div><small>${project.progress}%</small></td>
       <td>${project.aiCallCount}회</td><td><span class="teacher-status status-${project.status}">${statusLabels[project.status]}</span></td>
-      <td>${notification}</td><td>${formatDate(project.updatedAt)}</td><td><button type="button" class="row-view-button" data-project-id="${escapeHtml(project.id)}">보기</button></td>
+      <td>${notification}</td><td>${formatDate(project.updatedAt)}</td><td><button type="button" class="row-view-button" ${isDraft ? `data-action="view-data-row" data-source="${project.sourceCollection}" data-document-id="${escapeHtml(project.id)}"` : `data-project-id="${escapeHtml(project.id)}"`}>보기</button></td>
     </tr>`
   }).join('')
 }
@@ -153,7 +159,7 @@ function renderResults() {
   syncStatusControls()
 }
 
-const allProjectDataRows = () => normalizeTeacherDataRows(drafts, projects)
+const allProjectDataRows = () => normalizeTeacherDataRows(projects)
 const visibleProjectDataRows = () => filterTeacherDataRows(allProjectDataRows(), dataTableFilters)
 
 function dataTableRows(items) {
@@ -205,7 +211,7 @@ function renderDashboard() {
         <label class="teacher-search"><span class="sr-only">통합 검색</span><input type="search" data-filter="search" value="${escapeHtml(filters.search)}" placeholder="프로젝트명, 팀명, 학생 이름·이메일, 소개 검색" /></label>
         <select data-filter="className" aria-label="학급 필터">${classroomOptions()}</select>
         <select data-filter="status" aria-label="제출 상태 필터"><option value="all">전체 상태</option>${Object.entries(statusLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select>
-        <select data-filter="step" aria-label="현재 단계 필터"><option value="all">전체 단계</option>${[1,2,3,4,5,6].map((step) => `<option value="${step}">${step}단계</option>`).join('')}</select>
+        <select data-filter="step" aria-label="현재 단계 필터"><option value="all">전체 단계</option>${[1,2,3,4,5].map((step) => `<option value="${step}">${step}단계</option>`).join('')}</select>
         <select data-filter="board" aria-label="사용 보드 필터">${options(unique('board'), '전체 보드')}</select>
         <select data-filter="notification" aria-label="알림 상태 필터"><option value="all">전체 알림 상태</option><option value="unread">읽지 않음</option><option value="read">읽음</option><option value="none">알림 없음</option></select>
         <select data-filter="sort" aria-label="정렬"><option value="newest">최근 저장순</option><option value="oldest">오래된 저장순</option><option value="progress-desc">진행률 높은순</option><option value="progress-asc">진행률 낮은순</option><option value="name">프로젝트명 가나다순</option><option value="status">제출 상태순</option></select>
@@ -236,14 +242,16 @@ async function loadProjects({ keepDashboard = false } = {}) {
     renderState(result.error, '<button class="button button-primary" type="button" data-action="retry-projects">다시 시도</button>', false)
     return
   }
-  projects = result.projects
+  projectDocuments = result.projects
   drafts = draftResult.success ? draftResult.drafts : []
+  projects = normalizeAndDeduplicateProjects(drafts, projectDocuments)
   if (!draftResult.success) dashboardNotice = { type: 'error', message: draftResult.error }
   renderDashboard()
   if (!projectsUnsubscribe) {
     projectsUnsubscribe = subscribeAllProjectsForTeacher(
       (nextProjects) => {
-        projects = nextProjects
+        projectDocuments = nextProjects
+        projects = normalizeAndDeduplicateProjects(drafts, projectDocuments)
         renderDashboard()
         if (openDetailProjectId) void openDetails(openDetailProjectId, null)
       },
@@ -255,7 +263,7 @@ async function loadProjects({ keepDashboard = false } = {}) {
   }
   if (!draftsUnsubscribe) {
     draftsUnsubscribe = subscribeAllDraftsForTeacher(
-      (nextDrafts) => { drafts = nextDrafts; renderDashboard() },
+      (nextDrafts) => { drafts = nextDrafts; projects = normalizeAndDeduplicateProjects(drafts, projectDocuments); renderDashboard() },
       (error) => { dashboardNotice = { type: 'error', message: error.error }; renderDashboard() },
     )
   }
@@ -551,7 +559,8 @@ document.addEventListener('click', async (event) => {
     return
   }
   const trigger = event.target.closest('[data-project-id]')
-  if (trigger) await openDetails(trigger.dataset.projectId, trigger)
+  if (trigger?.dataset.source === 'drafts') trigger.querySelector('[data-action="view-data-row"]')?.click()
+  else if (trigger) await openDetails(trigger.dataset.projectId, trigger)
 })
 document.addEventListener('keydown', (event) => {
   const deleteModal = document.querySelector('.delete-modal')
@@ -578,7 +587,11 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.target.matches('input, button, select, textarea, a')) return
   const row = event.target.closest('.project-row')
-  if (row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(row.dataset.projectId, row) }
+  if (row && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault()
+    if (row.dataset.source === 'drafts') row.querySelector('[data-action="view-data-row"]')?.click()
+    else openDetails(row.dataset.projectId, row)
+  }
 })
 
 export const checkTeacherPermission = (user) => isCurrentUserTeacher(user)

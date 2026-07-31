@@ -80,6 +80,8 @@ export function isSameDraftProject(a = {}, b = {}) {
   const sameExplicitId = Boolean(a.projectId && b.projectId) && String(a.projectId) === String(b.projectId)
   const sameLegacyId = Boolean(a.legacyProjectId && b.legacyProjectId)
     && String(a.legacyProjectId) === String(b.legacyProjectId)
+  const sameSourceProjectId = Boolean(a.sourceProjectId && b.sourceProjectId)
+    && String(a.sourceProjectId) === String(b.sourceProjectId)
   const normalizedA = normalizeTitle(getProjectTitle(a))
   const sameOwnerAndTitle = Boolean(a.ownerId && b.ownerId)
     && String(a.ownerId) === String(b.ownerId)
@@ -87,7 +89,7 @@ export function isSameDraftProject(a = {}, b = {}) {
     && normalizedA === normalizeTitle(getProjectTitle(b))
   const isDraftLegacyPair = (a.sourceCollection === 'drafts' && b.sourceCollection === 'projects')
     || (a.sourceCollection === 'projects' && b.sourceCollection === 'drafts')
-  return sameExplicitId || sameLegacyId || (sameOwnerAndTitle && isDraftLegacyPair)
+  return sameExplicitId || sameLegacyId || sameSourceProjectId || (sameOwnerAndTitle && isDraftLegacyPair)
 }
 
 function timestampMillis(value) {
