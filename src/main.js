@@ -1,5 +1,10 @@
 // 전체 프로젝트 상태를 관리하고 단계별 화면과 사용자 상호작용을 연결합니다.
 import './style.css'
+
+console.info('[APP VERSION]', {
+  commit: __DEPLOY_COMMIT__,
+  reviewPayload: 'flat-v2',
+})
 import { createApiConnectionGate } from './components/apiConnectionGate.js'
 import { createHeader } from './components/header.js'
 import { createStepNavigation } from './components/stepNavigation.js'

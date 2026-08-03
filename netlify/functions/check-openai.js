@@ -36,7 +36,7 @@ export async function handler(event) {
       timeout: 10000,
     })
 
-    await client.models.retrieve('gpt-5.6-sol')
+    await client.models.list()
 
     return response(200, {
       success: true,
@@ -51,6 +51,7 @@ export async function handler(event) {
 
     return response(500, {
       success: false,
+      errorCode: error?.status === 401 ? 'OPENAI_AUTH_ERROR' : error?.status === 429 ? 'OPENAI_RATE_LIMIT' : 'OPENAI_CHECK_FAILED',
       message: 'OpenAI API 연결을 확인하지 못했습니다.',
     })
   }

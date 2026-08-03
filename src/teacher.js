@@ -15,7 +15,7 @@ import { createProjectSelection, createTeacherDataCsv, filterTeacherDataRows, no
 
 console.info('[DEPLOY VERSION]', {
   commit: __DEPLOY_COMMIT__,
-  payloadMode: 'flat-review-fields',
+  payloadMode: 'flat-v2',
 })
 
 const requestedStatus = new URLSearchParams(location.search).get('status')

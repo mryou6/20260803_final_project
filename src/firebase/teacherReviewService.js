@@ -140,8 +140,8 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
             reason: 'unexpected-review-fields',
           })
         }
-        console.log('[최종 projectPayload keys]', actualKeys)
-        console.log('[최종 projectPayload]', projectUpdatePayload)
+        console.log('[프로덕션 최종 payload keys]', actualKeys)
+        console.log('[프로덕션 최종 payload]', projectUpdatePayload)
       }
       if (import.meta.env?.DEV) {
         console.log('[수정 요청 시작]', {

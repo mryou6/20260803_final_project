@@ -6,13 +6,20 @@ const text = (value) => String(value ?? '').trim()
 const array = (value) => Array.isArray(value) ? value : []
 
 export async function checkOpenAiConnection() {
+  console.log('[OpenAI 연결 확인 시작]', { endpoint: CHECK_OPENAI_ENDPOINT })
   try {
     const response = await fetch(CHECK_OPENAI_ENDPOINT, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
     const payload = await response.json().catch(() => null)
+    console.log('[OpenAI 연결 확인 응답]', {
+      status: response.status,
+      ok: response.ok,
+      body: payload,
+    })
     return response.ok && payload?.success === true
       ? { success: true, message: 'OpenAI API 연결이 확인되었습니다.' }
-      : { success: false }
-  } catch {
+      : { success: false, errorCode: payload?.errorCode ?? 'OPENAI_CHECK_FAILED' }
+  } catch (error) {
+    console.error('[OpenAI 연결 확인 실패]', { name: error?.name, message: error?.message })
     return { success: false }
   }
 }
