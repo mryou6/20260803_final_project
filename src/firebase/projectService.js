@@ -121,10 +121,6 @@ export async function submitProject(projectId, user, projectData, draftId = null
       ...(wasReturned ? { resubmittedAt: serverTimestamp(), revisionInProgress: false } : {}),
       updatedAt: serverTimestamp(),
       resubmissionCount: wasReturned ? Math.max(0, Number(data?.resubmissionCount) || 0) + 1 : 0,
-      ...(wasReturned ? {
-        teacherReview: data.teacherReview ?? null,
-        reviewHistory: data.reviewHistory ?? [],
-      } : {}),
     }
     if (import.meta.env?.DEV && wasReturned) {
       console.debug('[학생 재제출 저장]', {

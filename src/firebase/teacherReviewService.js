@@ -99,7 +99,7 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
         notificationReadAt: '',
         notificationWasRead: false,
       }
-      const reviewUpdatePayload = {
+      const projectPayload = {
         status: PROJECT_STATUS.REVISION_REQUESTED,
         feedback,
         checklist,
@@ -125,9 +125,14 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
             approvedByName: reviewerName,
             updatedAt: serverTimestamp(),
           }
-        : reviewUpdatePayload
+        : projectPayload
       if (action === PROJECT_STATUS.REVISION_REQUESTED) {
         const actualKeys = Object.keys(projectUpdatePayload)
+        const forbiddenKeys = ['teacherReview']
+        const foundForbiddenKeys = actualKeys.filter((key) => forbiddenKeys.includes(key))
+        if (foundForbiddenKeys.length > 0) {
+          throw new Error(`금지된 중첩 필드가 payload에 포함됨: ${foundForbiddenKeys.join(', ')}`)
+        }
         const unexpectedKeys = actualKeys.filter((key) => !REVISION_PROJECT_KEYS.includes(key))
         console.log('[Rules 대조 결과]', { actualKeys, unexpectedKeys })
         if (unexpectedKeys.length) {
@@ -135,6 +140,8 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
             reason: 'unexpected-review-fields',
           })
         }
+        console.log('[최종 projectPayload keys]', actualKeys)
+        console.log('[최종 projectPayload]', projectUpdatePayload)
       }
       if (import.meta.env?.DEV) {
         console.log('[수정 요청 시작]', {

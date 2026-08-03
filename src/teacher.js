@@ -13,6 +13,11 @@ import { formatCurrency, formatDateTime } from './utils/dataNormalizer.js'
 import { normalizeProjectForOutput } from './utils/projectOutput.js'
 import { createProjectSelection, createTeacherDataCsv, filterTeacherDataRows, normalizeAndDeduplicateProjects, normalizeTeacherDataRows, projectSelectionKey, sortGradeClasses, toggleVisibleProjectSelections } from './utils/teacherProjectTable.js'
 
+console.info('[DEPLOY VERSION]', {
+  commit: __DEPLOY_COMMIT__,
+  payloadMode: 'flat-review-fields',
+})
+
 const requestedStatus = new URLSearchParams(location.search).get('status')
 const filters = {
   className: 'all',
