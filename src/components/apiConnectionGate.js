@@ -126,7 +126,6 @@ export function createApiConnectionGate(connectionState = {}) {
             </section>` : ''}
           ${roleReady && roleState.role === 'teacher' ? `
             <section class="role-entry-panel role-entry-teacher">
-              <span class="auth-role-badge role-teacher">교사</span>
               <h2>교사 프로젝트 관리 공간</h2>
               <p>학생들의 기획 진행 상황과 제출 결과를 확인할 수 있습니다.</p>
               <div class="role-entry-actions role-entry-actions-single">
