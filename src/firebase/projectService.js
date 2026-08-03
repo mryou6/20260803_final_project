@@ -201,25 +201,33 @@ export async function submitProject(projectId, user, projectData, draftId = null
 export async function deleteDraftProject(projectId, user) {
   if (!validUser(user) || !projectId) return fail('프로젝트 정보를 확인해 주세요.')
 
+  const projectRef = doc(db, 'projects', projectId)
   try {
-    const projectRef = doc(db, 'projects', projectId)
     const snapshot = await getDoc(projectRef)
     if (!snapshot.exists()) return fail('프로젝트를 찾을 수 없습니다.')
     const data = snapshot.data()
-    if (import.meta.env.DEV) {
-      console.log('[프로젝트 삭제 요청]', {
-        projectId,
-        ownerId: data.ownerId,
-        ownerID: data.ownerID,
-        status: data.status,
-        currentUserUid: auth?.currentUser?.uid,
-      })
-    }
+    console.log('[삭제 진단]', {
+      collection: 'projects',
+      path: projectRef.path,
+      documentId: projectRef.id,
+      currentUserUid: auth?.currentUser?.uid,
+      documentData: data,
+      ownerId: data?.ownerId,
+      ownerID: data?.ownerID,
+      status: data?.status,
+      submissionStatus: data?.submissionStatus,
+      reviewStatus: data?.reviewStatus,
+    })
     if ((data.ownerId || data.ownerID) !== user.uid) return fail('이 프로젝트를 삭제할 권한이 없습니다.', 'permission-denied')
     if (data.status !== 'draft') return fail('작성 중인 프로젝트만 삭제할 수 있습니다.', 'invalid-status')
     await deleteDoc(projectRef)
     return { success: true }
   } catch (error) {
+    console.error('[프로젝트 삭제 실패]', {
+      path: projectRef.path,
+      code: error?.code,
+      message: error?.message,
+    })
     if (error?.code === 'permission-denied') return fail('이 프로젝트를 삭제할 권한이 없습니다.', error.code)
     return fail('프로젝트 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', error?.code ?? '')
   }

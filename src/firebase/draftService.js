@@ -9,7 +9,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore'
-import { db } from './firebaseConfig.js'
+import { auth, db } from './firebaseConfig.js'
 import { sanitizeForFirestore } from '../utils/firestoreSanitizer.js'
 
 const fail = (error) => ({ success: false, error })
@@ -108,14 +108,31 @@ export async function getMyDrafts(user) {
 
 export async function deleteDraft(draftId, user) {
   if (!db || !draftId || !user?.uid) return { success: true }
+  const draftRef = doc(db, 'drafts', draftId)
   try {
-    const draftRef = doc(db, 'drafts', draftId)
     const snapshot = await getDoc(draftRef)
     if (!snapshot.exists()) return { success: true }
+    console.log('[삭제 진단]', {
+      collection: 'drafts',
+      path: draftRef.path,
+      documentId: draftRef.id,
+      currentUserUid: auth?.currentUser?.uid,
+      documentData: snapshot.data(),
+      ownerId: snapshot.data()?.ownerId,
+      ownerID: snapshot.data()?.ownerID,
+      status: snapshot.data()?.status,
+      submissionStatus: snapshot.data()?.submissionStatus,
+      reviewStatus: snapshot.data()?.reviewStatus,
+    })
     if (snapshot.data().ownerId !== user.uid) return fail('본인의 임시저장 문서만 삭제할 수 있습니다.')
     await deleteDoc(draftRef)
     return { success: true }
   } catch (error) {
+    console.error('[프로젝트 삭제 실패]', {
+      path: draftRef.path,
+      code: error?.code,
+      message: error?.message,
+    })
     return fail('임시저장 문서를 삭제하지 못했습니다.')
   }
 }
