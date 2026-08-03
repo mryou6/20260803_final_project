@@ -1162,18 +1162,23 @@ async function handleClick(event) {
     } else if (!window.confirm('최종 제출 후에는 교사 검토 전까지 수정할 수 없습니다. 제출하시겠습니까?')) return
     editorState.isSubmitting = true
     render()
-    if (!(await saveCurrentProject())) {
+    let result
+    try {
+      if (!(await saveCurrentProject())) return
+      result = await submitProject(
+        editorState.projectId,
+        studentUser,
+        toProjectDocument(projectState, getProcessLog()),
+        editorState.draftId,
+      )
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('[학생 최종 제출 예외]', error)
+      notice = '최종 제출 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+      return
+    } finally {
       editorState.isSubmitting = false
       render()
-      return
     }
-    const result = await submitProject(
-      editorState.projectId,
-      studentUser,
-      toProjectDocument(projectState, getProcessLog()),
-      editorState.draftId,
-    )
-    editorState.isSubmitting = false
     if (!result.success) {
       notice = result.error
       render()

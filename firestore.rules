@@ -15,6 +15,23 @@ service cloud.firestore {
       return isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
+    function teacherReviewFieldsOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "status", "feedback", "checklist", "requestedBy", "requestedByName",
+        "requestedAt", "studentRead", "studentReadAt", "revisionRequestedAt",
+        "revisionRequestedBy", "revisionRequestedByName", "revisionCount",
+        "reviewedAt", "reviewedBy", "reviewedByName", "updatedAt", "lastSavedAt"
+      ]);
+    }
+
+    function canRequestRevisionFromCurrentStatus() {
+      return resource.data.status in [
+        "submitted", "resubmitted", "revision_requested",
+        "pending", "review_pending", "under_review",
+        "returned", "revision", "revisionRequested", "rejected"
+      ] && request.resource.data.status == "revision_requested";
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isTeacher());
       allow create: if isSignedIn()
@@ -81,27 +98,32 @@ service cloud.firestore {
           isOwner()
           && resource.data.status in ["returned", "revision", "revisionRequested", "rejected", "revision_requested"]
           && request.resource.data.status == resource.data.status
-          && request.resource.data.teacherReview.studentRead == true
-          && request.resource.data.teacherReview.diff(resource.data.teacherReview).affectedKeys().hasOnly([
-            "studentRead", "studentReadAt"
-          ])
+          && request.resource.data.studentRead == true
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "teacherReview", "feedbackUnread", "revisionInProgress",
+            "studentRead", "studentReadAt", "feedbackUnread", "revisionInProgress",
             "revisionStartedAt", "updatedAt"
           ])
         )
         ||
         (
           isTeacher()
-          && resource.data.status in ["submitted", "resubmitted", "returned", "revision_requested"]
-          && request.resource.data.status == "revision_requested"
+          && canRequestRevisionFromCurrentStatus()
           && request.resource.data.ownerId == resource.data.ownerId
-          && request.resource.data.teacherReview.status == request.resource.data.status
-          && request.resource.data.reviewHistory.size() <= 10
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "status", "teacherReview", "lastTeacherFeedback", "reviewHistory",
-            "feedbackUnread", "revisionInProgress", "updatedAt"
+          && request.resource.data.reviewedBy.uid == request.auth.uid
+          && request.resource.data.checklist is map
+          && request.resource.data.checklist.keys().hasOnly([
+            "problemDefinition", "goalAndCriteria", "hardwareFeasibility",
+            "scheduleFeasibility", "safetyReview", "roleDistribution"
           ])
+          && request.resource.data.checklist.problemDefinition is bool
+          && request.resource.data.checklist.goalAndCriteria is bool
+          && request.resource.data.checklist.hardwareFeasibility is bool
+          && request.resource.data.checklist.scheduleFeasibility is bool
+          && request.resource.data.checklist.safetyReview is bool
+          && request.resource.data.checklist.roleDistribution is bool
+          && request.resource.data.studentRead == false
+          && request.resource.data.studentReadAt == null
+          && teacherReviewFieldsOnly()
         )
         ||
         (
@@ -122,7 +144,10 @@ service cloud.firestore {
       match /reviewHistory/{reviewId} {
         allow read: if isSignedIn()
           && (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid || isTeacher());
-        allow create: if isTeacher()
+        allow create: if (isTeacher()
+          && request.resource.data.action in ["revision_requested", "approved"]
+          && request.resource.data.actorType == "teacher"
+          && request.resource.data.actorId == request.auth.uid)
           || (
             isSignedIn()
             && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid
@@ -142,6 +167,9 @@ service cloud.firestore {
           (
             isTeacher()
             && request.resource.data.type in ["revision_requested", "project_approved"]
+            && exists(/databases/$(database)/documents/projects/$(request.resource.data.projectId))
+            && request.resource.data.recipientId
+              == get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.ownerId
           )
           ||
           (

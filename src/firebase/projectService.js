@@ -106,7 +106,7 @@ export async function submitProject(projectId, user, projectData, draftId = null
     }
 
     const wasReturned = currentStatus === 'revision_requested'
-    const teacherId = String(data?.teacherReview?.requestedBy ?? data?.teacherReview?.reviewedBy?.uid ?? '').trim()
+    const teacherId = String(data?.requestedBy ?? data?.revisionRequestedBy ?? data?.teacherReview?.requestedBy ?? data?.reviewedBy?.uid ?? data?.teacherReview?.reviewedBy?.uid ?? '').trim()
     const projectUpdatePayload = {
       ...cleanProjectData,
       ...(!data ? {
@@ -156,7 +156,7 @@ export async function submitProject(projectId, user, projectData, draftId = null
           actorName: user.displayName ?? '',
           createdBy: user.uid,
           createdAt: serverTimestamp(),
-          revisionNumber: Math.max(0, Number(data?.teacherReview?.revisionCount) || 0),
+          revisionNumber: Math.max(0, Number(data?.revisionCount ?? data?.teacherReview?.revisionCount) || 0),
         })
         if (teacherId) {
           failureStep = 'teacher-notification-create'
@@ -228,8 +228,8 @@ export async function markTeacherFeedbackAsRead(projectId, user) {
     const project = snapshot.data()
     if (project.ownerId !== user.uid) return fail('이 피드백을 확인할 권한이 없습니다.')
     if (normalizeProjectStatus(project.status) !== 'revision_requested') return fail('수정 요청 상태의 프로젝트만 읽음 처리할 수 있습니다.')
-    if (project.teacherReview?.studentRead === true && project.revisionInProgress === true) {
-      return { success: true, alreadyRead: true, readAt: project.teacherReview.studentReadAt }
+    if ((project.studentRead === true || project.teacherReview?.studentRead === true) && project.revisionInProgress === true) {
+      return { success: true, alreadyRead: true, readAt: project.studentReadAt ?? project.teacherReview?.studentReadAt }
     }
     const notificationSnapshot = await getDocs(query(
       collection(db, 'notifications'),
@@ -237,8 +237,8 @@ export async function markTeacherFeedbackAsRead(projectId, user) {
     ))
     const batch = writeBatch(db)
     batch.update(projectRef, {
-      'teacherReview.studentRead': true,
-      'teacherReview.studentReadAt': serverTimestamp(),
+      studentRead: true,
+      studentReadAt: serverTimestamp(),
       feedbackUnread: false,
       revisionInProgress: true,
       revisionStartedAt: project.revisionStartedAt ?? serverTimestamp(),

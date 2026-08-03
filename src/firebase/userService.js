@@ -40,7 +40,7 @@ export async function saveOrUpdateUser(user) {
 
 // 서버에서 사전 승인 교사 이메일을 확인하고 최종 사용자 역할을 반환합니다.
 export async function resolveUserRole(user) {
-  if (!user?.uid || !auth?.currentUser || auth.currentUser.uid !== user.uid) return 'student'
+  if (!user?.uid || !auth?.currentUser || auth.currentUser.uid !== user.uid) return 'unknown'
 
   try {
     const currentRole = await getUserRole(user)
@@ -56,12 +56,12 @@ export async function resolveUserRole(user) {
       cache: 'no-store',
     })
     const payload = await response.json().catch(() => null)
-    if (!response.ok || payload?.success !== true) return currentRole.role
+    if (!response.ok || payload?.ok !== true) return currentRole.success ? currentRole.role : 'unknown'
 
     const refreshedRole = await getUserRole(user)
     return refreshedRole.success ? refreshedRole.role : payload.role === 'teacher' ? 'teacher' : currentRole.role
   } catch {
-    return 'student'
+    return 'unknown'
   }
 }
 

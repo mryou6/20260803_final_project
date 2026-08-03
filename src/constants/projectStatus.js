@@ -40,7 +40,6 @@ export const normalizeProjectStatus = (projectOrStatus) => {
     review_pending: PROJECT_STATUS.SUBMITTED,
     under_review: PROJECT_STATUS.SUBMITTED,
     '검토 대기': PROJECT_STATUS.SUBMITTED,
-    resubmitted: PROJECT_STATUS.SUBMITTED,
     re_review: PROJECT_STATUS.SUBMITTED,
     resubmit: PROJECT_STATUS.SUBMITTED,
     resubmission: PROJECT_STATUS.SUBMITTED,

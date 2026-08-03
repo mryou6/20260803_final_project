@@ -129,9 +129,8 @@ export function createApiConnectionGate(connectionState = {}) {
               <span class="auth-role-badge role-teacher">교사</span>
               <h2>교사 프로젝트 관리 공간</h2>
               <p>학생들의 기획 진행 상황과 제출 결과를 확인할 수 있습니다.</p>
-              <div class="role-entry-actions">
-                <button class="gate-button gate-button-start" type="button" data-action="open-teacher" ${isConnected ? '' : 'disabled'}>학생 프로젝트 모니터링</button>
-                <button class="gate-button gate-button-secondary" type="button" data-action="open-submissions" ${isConnected ? '' : 'disabled'}>제출 및 검토 현황</button>
+              <div class="role-entry-actions role-entry-actions-single">
+                <button class="gate-button gate-button-start" type="button" data-action="open-teacher" aria-label="학생 프로젝트 모니터링 대시보드 열기" ${isConnected ? '' : 'disabled'}>학생 프로젝트 모니터링</button>
               </div>
             </section>` : ''}
           ${roleState.status === 'error' ? `<p class="auth-error-message" role="alert">${escapeHtml(roleState.message)}</p>` : ''}

@@ -41,8 +41,15 @@ assert.match(teacherPage, /getProjectDetailForTeacher\(projectId, currentTeacher
 assert.match(rules, /exists\(\/databases\/\$\(database\)\/documents\/teachers\/\$\(request\.auth\.uid\)\)/)
 assert.match(rules, /\.data\.active == true/)
 assert.match(rules, /request\.auth\.uid == teacherId/)
+assert.match(rules, /canRequestRevisionFromCurrentStatus\(\)/)
+assert.match(rules, /"pending", "review_pending", "under_review"/)
+assert.match(rules, /request\.resource\.data\.reviewedBy\.uid == request\.auth\.uid/)
 
-assert.match(resolver, /collection\('teachers'\)\.doc\(decodedToken\.uid\)\.get\(\)/)
+assert.match(resolver, /collection\('teachers'\)\.doc\(uid\)/)
+assert.match(resolver, /transaction\.get\(teacherRef\)/)
+assert.match(resolver, /collection\('users'\)\.doc\(uid\)/)
+assert.match(resolver, /replace\(\/\\\\n\/g, '\\n'\)/)
+assert.match(resolver, /getApps\(\)\.length \? getApp\(\) : initializeApp/)
 assert.doesNotMatch(resolver, /\.where\('email'/)
 
 console.log('교사 권한 검증 성공: UID 문서, active 조건, 단일 상세 조회, 하위 이력 조회, 오류 로그 통과')

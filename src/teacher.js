@@ -521,13 +521,20 @@ document.addEventListener('click', async (event) => {
     const buttons = panel.querySelectorAll('.review-actions button')
     buttons.forEach((button) => { button.disabled = true })
     actionElement.textContent = action === 'request-revision' ? '수정 요청 처리 중...' : '승인 처리 중...'
-    const result = action === 'request-revision'
-      ? await requestRevision(actionElement.dataset.projectId, currentTeacher, reviewData)
-      : await approveProject(actionElement.dataset.projectId, currentTeacher, reviewData)
-    if (!result.success) {
-      panel.querySelector('.review-message').textContent = result.error
+    let result
+    try {
+      result = action === 'request-revision'
+        ? await requestRevision(actionElement.dataset.projectId, currentTeacher, reviewData)
+        : await approveProject(actionElement.dataset.projectId, currentTeacher, reviewData)
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('[교사 검토 호출 실패]', error)
+      result = { success: false, error: '검토 결과 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' }
+    } finally {
       buttons.forEach((button) => { button.disabled = false })
       actionElement.textContent = action === 'request-revision' ? '수정 요청' : '승인 완료'
+    }
+    if (!result.success) {
+      panel.querySelector('.review-message').textContent = result.error
       return
     }
     const index = projects.findIndex((project) => project.id === actionElement.dataset.projectId)

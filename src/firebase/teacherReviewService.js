@@ -1,6 +1,6 @@
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore'
-import { db } from './firebaseConfig.js'
-import { normalizeProjectStatus } from '../constants/projectStatus.js'
+import { collection, doc, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { auth, db } from './firebaseConfig.js'
+import { normalizeProjectStatus, PROJECT_STATUS } from '../constants/projectStatus.js'
 
 export const reviewChecklistLabels = {
   problemDefinition: '문제 상황과 대상 사용자가 명확함',
@@ -17,6 +17,12 @@ const cleanChecklist = (value = {}) => Object.fromEntries(
 )
 const cleanText = (value, fallback = '') => String(value ?? '').trim() || fallback
 const fail = (error, errorCode = 'review-failed') => ({ success: false, error, errorCode })
+const REVISION_PROJECT_KEYS = Object.freeze([
+  'status', 'feedback', 'checklist', 'requestedBy', 'requestedByName', 'requestedAt',
+  'studentRead', 'studentReadAt', 'revisionRequestedAt', 'revisionRequestedBy',
+  'revisionRequestedByName', 'revisionCount', 'reviewedAt', 'reviewedBy',
+  'reviewedByName', 'updatedAt',
+])
 const normalizeDate = (value) => {
   if (!value) return null
   if (typeof value?.toDate === 'function') return value.toDate()
@@ -63,9 +69,9 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
       if (!projectSnapshot.exists()) throw Object.assign(new Error('not-found'), { reason: 'not-found' })
       const project = projectSnapshot.data()
       const currentStatus = normalizeProjectStatus(project.status)
-      const allowedStatuses = action === 'approved'
-        ? ['submitted', 'resubmitted']
-        : ['submitted', 'resubmitted', 'revision_requested']
+      const allowedStatuses = action === PROJECT_STATUS.APPROVED
+        ? [PROJECT_STATUS.SUBMITTED, PROJECT_STATUS.RESUBMITTED]
+        : [PROJECT_STATUS.SUBMITTED, PROJECT_STATUS.RESUBMITTED, PROJECT_STATUS.REVISION_REQUESTED]
       if (!allowedStatuses.includes(currentStatus)) throw Object.assign(new Error('status-conflict'), { reason: 'status-conflict' })
       if (!project.ownerId) throw Object.assign(new Error('owner-required'), { reason: 'owner-required' })
       const currentUpdatedAt = normalizeDate(project.updatedAt)?.toISOString() ?? ''
@@ -76,18 +82,9 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
         throw Object.assign(new Error('status-conflict'), { reason: 'status-conflict' })
       }
 
-      const previousHistory = Array.isArray(project.reviewHistory) ? project.reviewHistory : []
-      const previousNotification = project.teacherReview?.notification ?? {}
-      const preservedHistory = previousHistory.map((item, index) => {
-        if (index !== previousHistory.length - 1 || !['returned', 'revision_requested'].includes(item?.action)) return item
-        return {
-          ...item,
-          notificationCreatedAt: item.notificationCreatedAt ?? normalizeDate(previousNotification.createdAt)?.toISOString() ?? '',
-          notificationReadAt: normalizeDate(previousNotification.readAt)?.toISOString() ?? item.notificationReadAt ?? '',
-          notificationWasRead: previousNotification.isRead === true || item.notificationWasRead === true,
-        }
-      })
-      const revisionCount = Math.max(0, Number(project.teacherReview?.revisionCount) || 0) + (action === 'revision_requested' ? 1 : 0)
+      const storedRevisionCount = Number(project.revisionCount ?? project.teacherReview?.revisionCount)
+      const revisionCount = (Number.isFinite(storedRevisionCount) ? Math.max(0, storedRevisionCount) : 0)
+        + (action === PROJECT_STATUS.REVISION_REQUESTED ? 1 : 0)
       const reviewedAt = new Date().toISOString()
       const reviewerName = cleanText(teacherUser.displayName) || '교사'
       const historyItem = {
@@ -98,67 +95,86 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
         reviewedAt,
         previousStatus: currentStatus,
         nextStatus: action,
-        notificationCreatedAt: action === 'revision_requested' ? reviewedAt : '',
+        notificationCreatedAt: action === PROJECT_STATUS.REVISION_REQUESTED ? reviewedAt : '',
         notificationReadAt: '',
         notificationWasRead: false,
       }
       const reviewUpdatePayload = {
-        status: action,
-        teacherReview: {
-          status: action,
-          feedback,
-          checklist,
-          requestedBy: action === 'revision_requested' ? teacherUser.uid : project.teacherReview?.requestedBy ?? '',
-          requestedByName: action === 'revision_requested' ? reviewerName : project.teacherReview?.requestedByName ?? '',
-          requestedAt: action === 'revision_requested' ? serverTimestamp() : project.teacherReview?.requestedAt ?? null,
-          studentRead: action === 'revision_requested' ? false : project.teacherReview?.studentRead === true,
-          studentReadAt: action === 'revision_requested' ? null : project.teacherReview?.studentReadAt ?? null,
-          reviewedBy: {
-            uid: teacherUser.uid,
-            displayName: reviewerName,
-            email: cleanText(teacherUser.email),
-          },
-          reviewedAt: serverTimestamp(),
-          revisionCount,
-          notification: action === 'revision_requested'
-            ? { createdAt: serverTimestamp(), isRead: false, readAt: null, readBy: null }
-            : {
-                createdAt: previousNotification.createdAt ?? null,
-                isRead: previousNotification.isRead === true,
-                readAt: previousNotification.readAt ?? null,
-                readBy: previousNotification.readBy ?? null,
-              },
-        },
-        lastTeacherFeedback: {
-          type: action,
-          message: feedback,
-          createdBy: teacherUser.uid,
-          createdByName: reviewerName,
-          createdAt: serverTimestamp(),
-          readByStudent: false,
-          readAt: null,
-        },
-        feedbackUnread: action === 'revision_requested',
-        reviewHistory: [...preservedHistory, historyItem].slice(-10),
-        ...(action === 'revision_requested' ? { revisionInProgress: false } : {}),
-        ...(action === 'approved' ? {
-          approvedAt: serverTimestamp(),
-          approvedBy: teacherUser.uid,
-          approvedByName: reviewerName,
-          revisionInProgress: false,
-        } : {}),
+        status: PROJECT_STATUS.REVISION_REQUESTED,
+        feedback,
+        checklist,
+        requestedBy: teacherUser.uid,
+        requestedByName: reviewerName,
+        requestedAt: serverTimestamp(),
+        studentRead: false,
+        studentReadAt: null,
+        revisionRequestedAt: serverTimestamp(),
+        revisionRequestedBy: teacherUser.uid,
+        revisionRequestedByName: reviewerName,
+        revisionCount,
+        reviewedAt: serverTimestamp(),
+        reviewedBy: { uid: teacherUser.uid, displayName: reviewerName, email: cleanText(teacherUser.email) },
+        reviewedByName: reviewerName,
         updatedAt: serverTimestamp(),
       }
-      const projectUpdatePayload = action === 'approved'
+      const projectUpdatePayload = action === PROJECT_STATUS.APPROVED
         ? {
-            status: 'approved',
+            status: PROJECT_STATUS.APPROVED,
             approvedAt: serverTimestamp(),
             approvedBy: currentUser.uid,
             approvedByName: reviewerName,
             updatedAt: serverTimestamp(),
           }
         : reviewUpdatePayload
-      if (action === 'approved') {
+      if (action === PROJECT_STATUS.REVISION_REQUESTED) {
+        const actualKeys = Object.keys(projectUpdatePayload)
+        const unexpectedKeys = actualKeys.filter((key) => !REVISION_PROJECT_KEYS.includes(key))
+        console.log('[Rules 대조 결과]', { actualKeys, unexpectedKeys })
+        if (unexpectedKeys.length) {
+          throw Object.assign(new Error(`unexpected-review-fields:${unexpectedKeys.join(',')}`), {
+            reason: 'unexpected-review-fields',
+          })
+        }
+      }
+      if (import.meta.env?.DEV) {
+        console.log('[수정 요청 시작]', {
+          projectId,
+          teacherUid: auth?.currentUser?.uid,
+          teacherEmail: auth?.currentUser?.email,
+        })
+        console.group(action === PROJECT_STATUS.REVISION_REQUESTED ? '[수정 요청 저장 진단]' : '[교사 승인 진단]')
+        console.log('projectPath:', projectRef.path)
+        console.log('reviewHistoryPath:', historyRef.path)
+        console.log('notificationPath:', notificationRef.path)
+        console.log('projectId:', projectId)
+        console.log('currentStatus:', project.status)
+        console.log('normalizedStatus:', currentStatus)
+        console.log('nextStatus:', action)
+        console.log('currentUserUid:', auth?.currentUser?.uid)
+        console.log('currentUserEmail:', auth?.currentUser?.email)
+        console.log('resolvedTeacherUid:', teacherUser.uid)
+        console.log('projectUpdateKeys:', Object.keys(projectUpdatePayload))
+        console.log('[수정 요청 payload]', projectUpdatePayload)
+        console.log('[수정 요청 payload keys]', Object.keys(projectUpdatePayload))
+        console.log('[수정 요청 기존 문서]', {
+          exists: projectSnapshot.exists(), projectId,
+          ownerId: project.ownerId, ownerID: project.ownerID,
+          status: project.status, revisionCount: project.revisionCount,
+          keys: Object.keys(project),
+        })
+        console.log('[현재 로그인 교사]', {
+          uid: auth?.currentUser?.uid,
+          email: auth?.currentUser?.email,
+          displayName: auth?.currentUser?.displayName,
+        })
+        console.log('[교사 권한 문서]', {
+          path: userRef.path,
+          exists: userSnapshot.exists(),
+          data: userSnapshot.data(),
+        })
+        console.groupEnd()
+      }
+      if (action === PROJECT_STATUS.APPROVED) {
         console.group('[교사 승인 진단]')
         console.log('projectId:', projectId)
         console.log('teacherUid:', currentUser?.uid)
@@ -184,7 +200,10 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
         }
         console.table(approvalDiagnosis)
       }
+      if (import.meta.env?.DEV) console.log('[1/3] 프로젝트 상태 변경 시작', projectRef.path)
       transaction.update(projectRef, projectUpdatePayload)
+      if (import.meta.env?.DEV) console.log('[1/3] 프로젝트 상태 변경 트랜잭션 등록 완료')
+      if (import.meta.env?.DEV) console.log('[2/3] 검토 이력 저장 시작', historyRef.path)
       transaction.set(historyRef, {
         action,
         actorType: 'teacher',
@@ -198,7 +217,9 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
         studentRead: false,
         studentReadAt: null,
       })
-      if (action === 'revision_requested') {
+      if (import.meta.env?.DEV) console.log('[2/3] 검토 이력 저장 트랜잭션 등록 완료')
+      if (action === PROJECT_STATUS.REVISION_REQUESTED) {
+        if (import.meta.env?.DEV) console.log('[3/3] 학생 알림 저장 시작', notificationRef.path)
         transaction.set(notificationRef, {
           recipientId: project.ownerId,
           projectId,
@@ -209,7 +230,8 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
           read: false,
           createdAt: serverTimestamp(),
         })
-      } else if (action === 'approved') {
+        if (import.meta.env?.DEV) console.log('[3/3] 학생 알림 저장 트랜잭션 등록 완료')
+      } else if (action === PROJECT_STATUS.APPROVED) {
         transaction.set(notificationRef, {
           recipientId: project.ownerId,
           projectId,
@@ -224,20 +246,26 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
     })
     return {
       success: true,
-      message: action === 'revision_requested' ? '학생에게 수정 요청을 전송했습니다.' : '프로젝트 기획안을 승인했습니다.',
+      message: action === PROJECT_STATUS.REVISION_REQUESTED
+        ? '수정 요청이 완료되었습니다. 학생에게 피드백이 전달되었으며 기획안을 다시 수정할 수 있습니다.'
+        : '프로젝트 기획안을 승인했습니다.',
       status: action,
       ...result,
     }
   } catch (error) {
-    if (action === 'approved') {
-      console.error('[교사 승인 실패]', {
+    if (import.meta.env?.DEV) {
+      console.error(action === PROJECT_STATUS.REVISION_REQUESTED ? '[수정 요청 실패]' : '[교사 승인 실패]', {
         code: error?.code,
         message: error?.message,
-        name: error?.name,
         stack: error?.stack,
+        projectId,
+        currentUserUid: auth?.currentUser?.uid,
+        currentUserEmail: auth?.currentUser?.email,
+        teacherDocumentPath: teacherUser?.uid ? `teachers/${teacherUser.uid}` : null,
+        projectPath: projectId ? `projects/${projectId}` : null,
+        reviewHistoryPath: projectId ? `projects/${projectId}/reviewHistory/{generatedId}` : null,
+        notificationPath: 'notifications/{generatedId}',
       })
-    }
-    if (import.meta.env?.DEV) {
       console.error('[Teacher Review]', {
         projectId,
         teacherUid: teacherUser?.uid,
@@ -248,24 +276,55 @@ async function reviewProject(projectId, teacherUser, reviewData, action) {
       })
     }
     if (error?.reason === 'teacher-required' || error?.code === 'permission-denied') {
-      return fail('교사 권한 또는 Firestore 보안 규칙을 확인해 주세요.', error?.code ?? error.reason)
+      return fail('수정 요청을 저장할 권한이 없습니다. 교사 계정 등록 상태를 확인해 주세요.', error?.code ?? error.reason)
     }
     if (error?.reason === 'not-found' || error?.code === 'not-found') return fail('해당 프로젝트를 찾을 수 없습니다.', 'not-found')
-    if (error?.code === 'unauthenticated') return fail('로그인 후 다시 시도해 주세요.', 'unauthenticated')
+    if (error?.code === 'unauthenticated') return fail('로그인이 만료되었습니다. 다시 로그인해 주세요.', 'unauthenticated')
     if (error?.code === 'invalid-argument') return fail('수정 요청 데이터 형식이 올바르지 않습니다.', 'invalid-argument')
     if (error?.reason === 'owner-required') return fail('프로젝트 소유자 정보가 없어 수정 요청을 보낼 수 없습니다.', 'invalid-argument')
+    if (error?.reason === 'unexpected-review-fields') return fail('수정 요청 payload에 허용되지 않은 필드가 포함되어 저장을 중단했습니다.', 'invalid-argument')
     if (error?.reason === 'status-conflict' || error?.code === 'aborted') {
       return fail('다른 사용자가 프로젝트 상태를 먼저 변경했습니다.\n새로고침 후 다시 확인해 주세요.', 'status-conflict')
     }
-    return fail('수정 요청을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.', error?.code)
+    return fail('수정 요청 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', error?.code)
   }
 }
 
+// 명시적으로 호출하는 로컬 개발 진단 전용 함수입니다. 운영 빌드에서는 실행을 거부합니다.
+export async function diagnoseRevisionRequestWrites({ projectId, projectPayload, historyPayload, notificationPayload, diagnosticId }) {
+  if (!import.meta.env?.DEV) throw new Error('REVISION_DIAGNOSTIC_DEV_ONLY')
+  if (!projectId || !diagnosticId) throw new Error('REVISION_DIAGNOSTIC_ID_REQUIRED')
+  const projectRef = doc(db, 'projects', projectId)
+  const historyRef = doc(db, 'projects', projectId, 'reviewHistory', diagnosticId)
+  const notificationRef = doc(db, 'notifications', diagnosticId)
+  const result = { projectUpdate: null, reviewHistoryCreate: null, notificationCreate: null }
+  const steps = [
+    ['projectUpdate', projectRef, projectPayload, updateDoc],
+    ['reviewHistoryCreate', historyRef, { ...historyPayload, diagnosticId }, setDoc],
+    ['notificationCreate', notificationRef, { ...notificationPayload, diagnosticId }, setDoc],
+  ]
+  for (let index = 0; index < steps.length; index += 1) {
+    const [key, reference, payload, writer] = steps[index]
+    try {
+      console.log(`[진단 ${index + 1}/3] ${key} 시작`, { path: reference.path, keys: Object.keys(payload), payload })
+      await writer(reference, payload)
+      result[key] = { success: true, path: reference.path }
+      console.log(`[진단 ${index + 1}/3] ${key} 성공`, { path: reference.path })
+    } catch (error) {
+      result[key] = { success: false, path: reference.path, code: error?.code, message: error?.message }
+      console.error(`[진단 ${index + 1}/3] ${key} 실패`, { path: reference.path, code: error?.code, message: error?.message, payload })
+      break
+    }
+  }
+  console.table(result)
+  return result
+}
+
 export const requestRevision = (projectId, teacherUser, reviewData) =>
-  reviewProject(projectId, teacherUser, reviewData, 'revision_requested')
+  reviewProject(projectId, teacherUser, reviewData, PROJECT_STATUS.REVISION_REQUESTED)
 
 export const approveProject = (projectId, teacherUser, reviewData) =>
-  reviewProject(projectId, teacherUser, reviewData, 'approved')
+  reviewProject(projectId, teacherUser, reviewData, PROJECT_STATUS.APPROVED)
 
 export async function getReviewHistory(projectId) {
   if (!db || !projectId) return fail('프로젝트 정보를 확인해 주세요.')

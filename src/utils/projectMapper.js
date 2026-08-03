@@ -298,7 +298,22 @@ export function fromProjectDocument(documentData = {}) {
       finalCriteria: p.finalCriteria ?? null,
     },
     aiInteraction: { ...empty.aiInteraction, ...(documentData.aiInteraction ?? {}) },
-    teacherReview: { ...empty.teacherReview, ...(documentData.teacherReview ?? {}), checklist: { ...empty.teacherReview.checklist, ...(documentData.teacherReview?.checklist ?? {}) }, reviewedBy: { ...empty.teacherReview.reviewedBy, ...(documentData.teacherReview?.reviewedBy ?? {}) }, notification: { ...empty.teacherReview.notification, ...(documentData.teacherReview?.notification ?? {}) } },
+    teacherReview: {
+      ...empty.teacherReview,
+      ...(documentData.teacherReview ?? {}),
+      status: documentData.teacherReview?.status ?? documentData.status,
+      feedback: documentData.teacherReview?.feedback ?? documentData.feedback ?? '',
+      checklist: { ...empty.teacherReview.checklist, ...(documentData.teacherReview?.checklist ?? documentData.checklist ?? {}) },
+      requestedBy: documentData.teacherReview?.requestedBy ?? documentData.requestedBy ?? documentData.revisionRequestedBy ?? '',
+      requestedByName: documentData.teacherReview?.requestedByName ?? documentData.requestedByName ?? documentData.revisionRequestedByName ?? '',
+      requestedAt: documentData.teacherReview?.requestedAt ?? documentData.requestedAt ?? documentData.revisionRequestedAt ?? null,
+      studentRead: documentData.teacherReview?.studentRead ?? documentData.studentRead ?? false,
+      studentReadAt: documentData.teacherReview?.studentReadAt ?? documentData.studentReadAt ?? null,
+      reviewedBy: { ...empty.teacherReview.reviewedBy, ...(documentData.teacherReview?.reviewedBy ?? documentData.reviewedBy ?? {}) },
+      reviewedAt: documentData.teacherReview?.reviewedAt ?? documentData.reviewedAt ?? null,
+      revisionCount: documentData.teacherReview?.revisionCount ?? documentData.revisionCount ?? 0,
+      notification: { ...empty.teacherReview.notification, ...(documentData.teacherReview?.notification ?? {}) },
+    },
     reviewHistory: asArray(documentData.reviewHistory),
   }
 }

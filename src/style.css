@@ -747,6 +747,10 @@ body {
   gap: .65rem;
 }
 
+.role-entry-actions-single {
+  grid-template-columns: 1fr;
+}
+
 .gate-button-secondary {
   border: 1px solid rgba(94, 234, 212, .55);
   background: rgba(15, 118, 110, .25);

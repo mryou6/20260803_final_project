@@ -85,8 +85,17 @@ export function normalizeProjectData(project = {}, id = '') {
   const teacherReview = {
     ...empty.teacherReview,
     ...(project.teacherReview ?? {}),
-    checklist: { ...empty.teacherReview.checklist, ...(project.teacherReview?.checklist ?? {}) },
-    reviewedBy: { ...empty.teacherReview.reviewedBy, ...(project.teacherReview?.reviewedBy ?? {}) },
+    status: project.teacherReview?.status ?? project.status,
+    feedback: project.teacherReview?.feedback ?? project.feedback,
+    checklist: { ...empty.teacherReview.checklist, ...(project.teacherReview?.checklist ?? project.checklist ?? {}) },
+    requestedBy: project.teacherReview?.requestedBy ?? project.requestedBy ?? project.revisionRequestedBy ?? '',
+    requestedByName: project.teacherReview?.requestedByName ?? project.requestedByName ?? project.revisionRequestedByName ?? '',
+    requestedAt: project.teacherReview?.requestedAt ?? project.requestedAt ?? project.revisionRequestedAt ?? null,
+    studentRead: project.teacherReview?.studentRead ?? project.studentRead ?? false,
+    studentReadAt: project.teacherReview?.studentReadAt ?? project.studentReadAt ?? null,
+    reviewedBy: { ...empty.teacherReview.reviewedBy, ...(project.teacherReview?.reviewedBy ?? project.reviewedBy ?? {}) },
+    reviewedAt: project.teacherReview?.reviewedAt ?? project.reviewedAt ?? null,
+    revisionCount: project.teacherReview?.revisionCount ?? project.revisionCount ?? 0,
     notification: { ...empty.teacherReview.notification, ...(project.teacherReview?.notification ?? {}) },
   }
   teacherReview.feedback = cleanText(
