@@ -8,6 +8,7 @@ import { downloadProjectPlanAsDocx } from './services/documentService.js'
 import { createTeacherReviewPanel, readTeacherReviewForm } from './components/teacherReviewPanel.js'
 import { approveProject, requestRevision, reviewChecklistLabels } from './firebase/teacherReviewService.js'
 import { createDeleteProjectsModal, trapDeleteModalFocus } from './components/deleteProjectsModal.js'
+import { showToast } from './components/toast.js'
 import { PROJECT_STATUS_LABELS, STATUS_CARD_FILTERS } from './constants/projectStatus.js'
 import { formatCurrency, formatDateTime } from './utils/dataNormalizer.js'
 import { normalizeProjectForOutput } from './utils/projectOutput.js'
@@ -507,6 +508,9 @@ document.addEventListener('click', async (event) => {
   if (action === 'request-revision' || action === 'approve-project') {
     const panel = actionElement.closest('.teacher-review-panel')
     const reviewData = readTeacherReviewForm(panel)
+    const projectId = actionElement.dataset.projectId
+    const currentProject = projects.find((project) => project.id === projectId)
+    if (action === 'request-revision' && (currentProject?.status === 'revision_requested' || panel?.dataset.expectedStatus === 'revision_requested')) return
     if (action === 'request-revision' && reviewData.feedback.replace(/\s/g, '').length < 10) {
       panel.querySelector('.review-message').textContent = '수정 요청 피드백을 공백 제외 10자 이상 입력해 주세요.'
       panel.querySelector('textarea')?.focus()
@@ -525,53 +529,68 @@ document.addEventListener('click', async (event) => {
     if (!window.confirm(question)) return
     const buttons = panel.querySelectorAll('.review-actions button')
     buttons.forEach((button) => { button.disabled = true })
+    panel.querySelector('.review-message').textContent = ''
     actionElement.textContent = action === 'request-revision' ? '수정 요청 처리 중...' : '승인 처리 중...'
-    let result
     try {
-      result = action === 'request-revision'
-        ? await requestRevision(actionElement.dataset.projectId, currentTeacher, reviewData)
+      const result = action === 'request-revision'
+        ? await requestRevision(projectId, currentTeacher, reviewData)
         : await approveProject(actionElement.dataset.projectId, currentTeacher, reviewData)
+      if (!result.success) throw Object.assign(new Error(result.error), { code: result.errorCode })
+
+      if (action === 'request-revision') {
+        dashboardNotice = null
+        showToast({
+          type: 'success',
+          title: '수정 요청을 보냈습니다.',
+          message: '학생에게 피드백이 전달되었으며, 기획안을 다시 수정할 수 있습니다.',
+          duration: 3500,
+        })
+      }
+
+      const index = projects.findIndex((project) => project.id === projectId)
+      if (index >= 0) {
+        const previous = projects[index]
+        const historyItem = { ...result.historyItem, reviewedAt: new Date(result.historyItem.reviewedAt) }
+        projects[index] = {
+          ...previous,
+          status: result.status,
+          updatedAt: new Date(),
+          teacherReview: {
+            status: result.status, feedback: reviewData.feedback, checklist: reviewData.checklist,
+            requestedBy: currentTeacher?.uid || '', requestedByName: currentTeacher?.displayName || '교사',
+            requestedAt: new Date(), studentRead: false, studentReadAt: null,
+            reviewedBy: { displayName: currentTeacher?.displayName || '교사' }, reviewedAt: new Date(),
+            revisionCount: result.revisionCount,
+            notification: result.status === 'revision_requested'
+              ? { createdAt: new Date(), isRead: false, readAt: null, readBy: null }
+              : previous.teacherReview?.notification ?? {},
+          },
+          reviewHistory: [...array(previous.reviewHistory), historyItem].slice(-10),
+        }
+      }
+      renderDashboard()
+      await openDetails(projectId, null)
+      await loadProjects({ keepDashboard: true })
+      if (action !== 'request-revision') document.querySelector('.review-message').textContent = result.message
     } catch (error) {
       if (import.meta.env.DEV) console.error('[교사 검토 호출 실패]', error)
-      result = { success: false, error: '검토 결과 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' }
+      showToast({
+        type: 'error',
+        title: action === 'request-revision' ? '수정 요청에 실패했습니다.' : '승인에 실패했습니다.',
+        message: error?.code === 'permission-denied'
+          ? '교사 권한 또는 Firestore 보안 규칙을 확인해 주세요.'
+          : '잠시 후 다시 시도해 주세요.',
+        duration: 3500,
+      })
+      panel.querySelector('.review-message').textContent = error?.message || '잠시 후 다시 시도해 주세요.'
     } finally {
       buttons.forEach((button) => { button.disabled = false })
-      actionElement.textContent = action === 'request-revision' ? '수정 요청' : '승인 완료'
+      const completed = projects.find((project) => project.id === projectId)?.status === 'revision_requested'
+      actionElement.disabled = action === 'request-revision' && completed
+      actionElement.textContent = action === 'request-revision'
+        ? (completed ? '수정 요청 완료' : '수정 요청')
+        : '승인 완료'
     }
-    if (!result.success) {
-      panel.querySelector('.review-message').textContent = result.error
-      return
-    }
-    const index = projects.findIndex((project) => project.id === actionElement.dataset.projectId)
-    if (index >= 0) {
-      const previous = projects[index]
-      const historyItem = { ...result.historyItem, reviewedAt: new Date(result.historyItem.reviewedAt) }
-      projects[index] = {
-        ...previous,
-        status: result.status,
-        updatedAt: new Date(),
-        teacherReview: {
-          status: result.status,
-          feedback: reviewData.feedback,
-          checklist: reviewData.checklist,
-          requestedBy: currentTeacher?.uid || '',
-          requestedByName: currentTeacher?.displayName || '교사',
-          requestedAt: new Date(),
-          studentRead: false,
-          studentReadAt: null,
-          reviewedBy: { displayName: currentTeacher?.displayName || '교사' },
-          reviewedAt: new Date(),
-          revisionCount: result.revisionCount,
-          notification: result.status === 'revision_requested'
-            ? { createdAt: new Date(), isRead: false, readAt: null, readBy: null }
-            : previous.teacherReview?.notification ?? {},
-        },
-        reviewHistory: [...array(previous.reviewHistory), historyItem].slice(-10),
-      }
-    }
-    renderDashboard()
-    await openDetails(actionElement.dataset.projectId, null)
-    document.querySelector('.review-message').textContent = result.message
     return
   }
   const trigger = event.target.closest('[data-project-id]')

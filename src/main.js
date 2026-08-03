@@ -9,6 +9,7 @@ import { createApiConnectionGate } from './components/apiConnectionGate.js'
 import { createHeader } from './components/header.js'
 import { createStepNavigation } from './components/stepNavigation.js'
 import { createProjectForm } from './components/projectForm.js'
+import { showToast } from './components/toast.js'
 import { createPartsSelector } from './components/partsSelector.js'
 import { createPlanPreview } from './components/planPreview.js'
 import { createAiFeedback, createNotice } from './components/aiFeedback.js'
@@ -124,6 +125,8 @@ function renderStudentDashboard() {
     const title = (state.basic?.projectName || draft.projectName || draft.title || draft.projectTitle)?.trim() || '제목 없는 프로젝트'
     const currentStep = Math.max(1, Number(draft.currentStep) || 1)
     const progress = Math.min(100, Math.round(currentStep / 5 * 100))
+    const isOwner = (draft.ownerId || draft.ownerID) === studentUser?.uid
+    const canDeleteProject = isOwner && normalizeProjectStatus(draft.status || 'draft') === 'draft'
     return `<article class="my-project-card draft-project-card">
       <div class="project-card-heading"><span class="project-status status-draft">작성 중</span><small>${formatSavedTime(draft.displaySavedAt || draft.updatedAt || draft.lastSavedAt)}</small></div>
       <h3>${escapeHtml(title)}</h3>
@@ -131,7 +134,7 @@ function renderStudentDashboard() {
       <div class="project-card-meta"><span>현재 ${currentStep}단계 · ${progress}%</span><span>마지막 저장 ${formatSavedTime(draft.displaySavedAt || draft.updatedAt || draft.lastSavedAt)}</span></div>
       <div class="project-card-actions">
         <button class="button button-primary" type="button" data-action="continue-merged-draft" data-draft-identity="${escapeHtml(draft.draftIdentity)}">이어서 작성</button>
-        <button class="button project-delete-button" type="button" data-action="delete-draft-group" data-linked-sources="${escapeHtml(JSON.stringify(linkedSources))}">삭제</button>
+        ${canDeleteProject ? `<button class="button project-delete-button" type="button" data-action="delete-draft-group" data-linked-sources="${escapeHtml(JSON.stringify(linkedSources))}">삭제</button>` : ''}
       </div>
     </article>`
   }).join('') : '<p class="projects-empty">작성 중인 프로젝트가 없습니다.</p>'
@@ -863,18 +866,26 @@ async function handleClick(event) {
       'production.difficultyPlans': { difficulty: '', solution: '' },
       'production.testPlans': { feature: '', method: '', successCondition: '' },
     }
-    list.push({ id: createId('row'), ...(templates[button.dataset.path] ?? { value: '' }) })
+    const newRow = { id: createId('row'), ...(templates[button.dataset.path] ?? { value: '' }) }
+    list.push(newRow)
     render()
+    requestAnimationFrame(() => document.querySelector(`[data-row-path="${button.dataset.path}"][data-id="${newRow.id}"]`)?.focus())
   }
 
   if (action === 'remove-row') {
     const path = button.dataset.path
     const list = getNestedValue(path)
+    const removedIndex = list.findIndex((item) => item.id === button.dataset.id)
     const filtered = list.filter((item) => item.id !== button.dataset.id)
     const keys = path.split('.')
     const target = keys.slice(0, -1).reduce((value, key) => value[key], projectState)
     target[keys.at(-1)] = filtered
     render()
+    const focusRow = filtered[Math.max(0, Math.min(removedIndex - 1, filtered.length - 1))]
+    requestAnimationFrame(() => {
+      if (focusRow) document.querySelector(`[data-row-path="${path}"][data-id="${focusRow.id}"]`)?.focus()
+      else document.querySelector(`[data-action="add-row"][data-path="${path}"]`)?.focus()
+    })
   }
 
   if (action === 'toggle-core-value') {
@@ -1055,17 +1066,48 @@ async function handleClick(event) {
       ? '연결된 작성 중 데이터가 함께 삭제됩니다. 삭제할까요? 삭제한 내용은 복구할 수 없습니다.'
       : '작성 중인 프로젝트를 삭제할까요? 삭제한 내용은 복구할 수 없습니다.'
     if (!window.confirm(message)) return
+    button.disabled = true
+    button.textContent = '삭제 중…'
     console.log('[Draft delete targets]')
     console.table(sources)
-    const results = []
-    for (const source of sources) {
-      results.push(source.collection === 'projects'
-        ? await deleteDraftProject(source.documentId, studentUser)
-        : await deleteDraft(source.documentId, studentUser))
+    try {
+      const results = []
+      for (const source of sources) {
+        results.push(source.collection === 'projects'
+          ? await deleteDraftProject(source.documentId, studentUser)
+          : await deleteDraft(source.documentId, studentUser))
+      }
+      const failed = results.find((result) => !result.success)
+      if (failed) throw Object.assign(new Error(failed.error), { code: failed.errorCode })
+
+      const draftIds = new Set(sources.filter((source) => source.collection === 'drafts').map((source) => source.documentId))
+      const projectIds = new Set(sources.filter((source) => source.collection === 'projects').map((source) => source.documentId))
+      myDrafts = myDrafts.filter((draft) => !draftIds.has(draft.id))
+      myProjects = myProjects.filter((project) => !projectIds.has(project.id))
+      projectRouteMessage = ''
+      render()
+      showToast({
+        type: 'success',
+        title: '프로젝트를 삭제했습니다.',
+        message: '작성 중인 프로젝트가 목록에서 삭제되었습니다.',
+        duration: 3500,
+      })
+      await refreshMyProjects()
+    } catch (error) {
+      projectRouteMessage = error?.code === 'permission-denied'
+        ? '이 프로젝트를 삭제할 권한이 없습니다.'
+        : '프로젝트 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+      showToast({
+        type: 'error',
+        title: '프로젝트 삭제에 실패했습니다.',
+        message: projectRouteMessage,
+        duration: 3500,
+      })
+      render()
+    } finally {
+      button.disabled = false
+      button.textContent = '삭제'
     }
-    const failed = results.find((result) => !result.success)
-    projectRouteMessage = failed ? failed.error : '작성 중인 프로젝트를 삭제했습니다.'
-    await refreshMyProjects()
     return
   }
 
@@ -1320,6 +1362,11 @@ export function initializeApp(user = null) {
   document.addEventListener('change', handleInput)
   document.addEventListener('click', handleClick)
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && event.target.matches('[data-row-path^="features."]')) {
+      event.preventDefault()
+      document.querySelector(`[data-action="add-row"][data-path="${event.target.dataset.rowPath}"]`)?.click()
+      return
+    }
     const card = event.target.closest('.my-project-card[data-action="open-project"]')
     if (card && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault()

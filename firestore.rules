@@ -11,8 +11,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active == true;
     }
 
+    function getOwnerId() {
+      return resource.data.get("ownerId", resource.data.get("ownerID", ""));
+    }
+
+    function isDocumentOwner() {
+      return isSignedIn() && getOwnerId() == request.auth.uid;
+    }
+
     function isOwner() {
-      return isSignedIn() && resource.data.ownerId == request.auth.uid;
+      return isDocumentOwner();
     }
 
     function teacherReviewFieldsOnly() {
@@ -137,9 +145,8 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isSignedIn() && (
-        isTeacher() || (isOwner() && resource.data.status in ["draft", "writing", "in_progress", "작성 중"])
-      );
+      allow delete: if isTeacher()
+        || (isDocumentOwner() && resource.data.get("status", "") == "draft");
 
       match /reviewHistory/{reviewId} {
         allow read: if isSignedIn()

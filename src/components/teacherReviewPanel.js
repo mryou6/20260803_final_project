@@ -18,7 +18,8 @@ export function createTeacherReviewPanel(project) {
   const review = project.teacherReview ?? {}
   const checklist = review.checklist ?? {}
   const notification = review.notification ?? {}
-  const enabled = ['submitted', 'resubmitted', 'revision_requested'].includes(project.status)
+  const enabled = ['submitted', 'resubmitted'].includes(project.status)
+  const revisionRequested = project.status === 'revision_requested'
   const approvalEnabled = ['submitted', 'resubmitted'].includes(project.status)
   const guide = project.status === 'draft'
     ? '아직 학생이 최종 제출하지 않은 프로젝트입니다.'
@@ -47,7 +48,7 @@ export function createTeacherReviewPanel(project) {
     <label class="review-feedback"><span>종합 피드백</span><textarea rows="5" placeholder="수정할 내용이나 승인 의견을 입력하세요." ${enabled ? '' : 'disabled'}>${escapeHtml(String(review.feedback || ''))}</textarea></label>
     ${guide ? `<p class="review-guide">${guide}</p>` : ''}
     <div class="review-actions">
-      <button class="button button-secondary" type="button" data-action="request-revision" data-project-id="${escapeHtml(project.id)}" ${enabled ? '' : 'disabled'}>수정 요청</button>
+      <button class="button button-secondary" type="button" data-action="request-revision" data-project-id="${escapeHtml(project.id)}" ${enabled ? '' : 'disabled'}>${revisionRequested ? '수정 요청 완료' : '수정 요청'}</button>
       <button class="button button-primary" type="button" data-action="approve-project" data-project-id="${escapeHtml(project.id)}" ${approvalEnabled ? '' : 'disabled'}>${project.status === 'approved' ? '승인 완료됨' : '승인 완료'}</button>
     </div>
     <div class="review-message" aria-live="polite"></div>

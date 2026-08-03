@@ -617,9 +617,144 @@ body {
 }
 
 .design-divider {
-  margin: 1.5rem 0 1rem;
-  padding-top: 1.25rem;
+  margin: .75rem 0 1rem;
+  padding-top: 1rem;
   border-top: 1px solid #dbe7e4;
+}
+
+.design-form {
+  gap: 1.5rem;
+}
+
+.feature-field-group {
+  min-width: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid #dbe7e4;
+  border-left: 4px solid #79aa9e;
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+
+.feature-field-group:nth-child(2) {
+  border-left-color: #d0a45e;
+  background: #fffdf8;
+}
+
+.feature-field-group.is-ordered {
+  border-left-color: #5a8695;
+  background: #f8fbfc;
+}
+
+.feature-field-heading h3,
+.feature-field-heading p {
+  margin: 0;
+}
+
+.feature-field-heading h3 {
+  color: var(--green-950);
+  font-size: .95rem;
+}
+
+.feature-field-heading h3 b {
+  color: var(--orange);
+}
+
+.feature-field-heading p {
+  margin-top: .4rem;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 400;
+}
+
+.feature-field-group .repeat-list {
+  gap: .5rem;
+  margin-top: .75rem;
+}
+
+.feature-field-group .repeat-card {
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  gap: .5rem;
+  padding: .35rem;
+  border: 0;
+  background: transparent;
+}
+
+.feature-field-group .repeat-card input {
+  min-height: 42px;
+}
+
+.feature-field-group .row-number {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green-700);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.feature-field-group.is-ordered .repeat-list {
+  position: relative;
+}
+
+.feature-field-group.is-ordered .repeat-list::before {
+  position: absolute;
+  top: 1rem;
+  bottom: 1rem;
+  left: 1.35rem;
+  width: 2px;
+  background: #b8d1d9;
+  content: '';
+}
+
+.feature-field-group.is-ordered .row-number {
+  z-index: 1;
+  background: #397487;
+}
+
+.feature-add-button {
+  min-height: 40px;
+  margin-top: .625rem;
+  padding: .5rem .8rem;
+  border: 1px solid #9cc9bd;
+  border-radius: 9px;
+  color: var(--green-700);
+  background: transparent;
+  font-size: .8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.feature-add-button:hover {
+  border-color: var(--green-700);
+  background: #edf8f4;
+}
+
+.feature-add-button:focus-visible {
+  outline: 3px solid rgb(29 114 81 / 18%);
+  outline-offset: 2px;
+}
+
+.repeat-empty {
+  display: grid;
+  gap: .2rem;
+  margin-top: .75rem;
+  padding: .7rem .8rem;
+  border-radius: 9px;
+  color: var(--muted);
+  background: rgb(255 255 255 / 70%);
+  font-size: .78rem;
+}
+
+.repeat-empty strong {
+  color: #53615c;
+}
+
+.repeat-remove-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .design-divider h3,
@@ -695,6 +830,28 @@ body {
   .repeat-card {
     grid-template-columns: 1.7rem minmax(0, 1fr) auto;
     padding: .6rem;
+  }
+
+  .feature-field-group {
+    padding: .9rem .75rem;
+  }
+
+  .feature-field-group .repeat-card {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .feature-field-group .repeat-remove-button {
+    grid-column: 2;
+    justify-self: end;
+    min-height: 36px;
+  }
+
+  .feature-field-group.is-ordered .repeat-list::before {
+    left: 1.1rem;
+  }
+
+  .feature-add-button {
+    width: 100%;
   }
 
   .structured-head {

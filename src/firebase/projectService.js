@@ -13,13 +13,13 @@ import {
   runTransaction,
   writeBatch,
 } from 'firebase/firestore'
-import { db } from './firebaseConfig.js'
+import { auth, db } from './firebaseConfig.js'
 import { validateSubmissionData } from '../utils/projectValidation.js'
 import { sanitizeForFirestore } from '../utils/firestoreSanitizer.js'
 import { normalizeProjectStatus } from '../constants/projectStatus.js'
 import { normalizeProjectData } from '../utils/dataNormalizer.js'
 
-const fail = (error) => ({ success: false, error })
+const fail = (error, errorCode = '') => ({ success: false, error, errorCode })
 const errorMessages = {
   'permission-denied': 'Firestore 보안 규칙으로 인해 저장할 수 없습니다.',
   unauthenticated: '로그인 상태를 확인해 주세요.',
@@ -30,7 +30,7 @@ const errorMessages = {
 
 function safeError(error, fallback = '프로젝트 저장 중 오류가 발생했습니다.') {
   if (import.meta.env.DEV) console.error('[Firestore] 실패 code:', error?.code ?? 'unknown')
-  return fail(errorMessages[error?.code] ?? fallback)
+  return fail(errorMessages[error?.code] ?? fallback, error?.code ?? '')
 }
 
 function validUser(user) {
@@ -206,12 +206,22 @@ export async function deleteDraftProject(projectId, user) {
     const snapshot = await getDoc(projectRef)
     if (!snapshot.exists()) return fail('프로젝트를 찾을 수 없습니다.')
     const data = snapshot.data()
-    if (data.ownerId !== user.uid) return fail('이 프로젝트를 삭제할 권한이 없습니다.')
-    if (normalizeProjectStatus(data) !== 'draft') return fail('작성 중인 프로젝트만 삭제할 수 있습니다.')
+    if (import.meta.env.DEV) {
+      console.log('[프로젝트 삭제 요청]', {
+        projectId,
+        ownerId: data.ownerId,
+        ownerID: data.ownerID,
+        status: data.status,
+        currentUserUid: auth?.currentUser?.uid,
+      })
+    }
+    if ((data.ownerId || data.ownerID) !== user.uid) return fail('이 프로젝트를 삭제할 권한이 없습니다.', 'permission-denied')
+    if (data.status !== 'draft') return fail('작성 중인 프로젝트만 삭제할 수 있습니다.', 'invalid-status')
     await deleteDoc(projectRef)
     return { success: true }
   } catch (error) {
-    return safeError(error, '프로젝트를 삭제하지 못했습니다.')
+    if (error?.code === 'permission-denied') return fail('이 프로젝트를 삭제할 권한이 없습니다.', error.code)
+    return fail('프로젝트 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', error?.code ?? '')
   }
 }
 

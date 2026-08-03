@@ -101,7 +101,7 @@ export async function getProjectDetailForTeacher(projectId, currentUser) {
     const data = snapshot.data()
     const externalHistory = historySnapshot.docs
       .map((item) => item.data())
-      .filter((item) => ['resubmitted', 'approved'].includes(item.action))
+      .filter((item) => ['revision_requested', 'resubmitted', 'approved'].includes(item.action))
     return {
       success: true,
       project: normalizeTeacherProject({

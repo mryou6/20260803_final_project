@@ -13,8 +13,29 @@ const formatWonInput = (value) => {
   return digits ? Number(digits).toLocaleString('ko-KR') : ''
 }
 
-function repeatText(path, rows, label, placeholder, required = false) {
-  return `<div class="field field-wide repeat-field"><div class="field-heading"><span>${label}${required ? '<b aria-hidden="true"> *</b>' : ''}</span></div><div class="repeat-list">${rows.map((item, index) => `<div class="repeat-card"><span class="row-number">${index + 1}</span><input data-row-path="${path}" data-id="${item.id}" data-row-field="value" value="${escapeHtml(item.value)}" placeholder="${placeholder}"/><button class="icon-button" type="button" data-action="remove-row" data-path="${path}" data-id="${item.id}" ${rows.length === 1 ? 'disabled' : ''}>삭제</button></div>`).join('')}</div><button class="text-button add-row-button" type="button" data-action="add-row" data-path="${path}">+ 항목 추가</button><span class="error-slot">${error(path)}</span></div>`
+function repeatText(path, rows, { label, help, placeholder, addLabel, required = false, ordered = false, empty = null }) {
+  const pathKey = path.replaceAll('.', '-')
+  const errorId = `${pathKey}-error`
+  const minimumReason = `최소 1개의 ${label.replace('반드시 구현할 ', '').replace('작품의 전체 ', '')}이 필요합니다.`
+  const items = rows.map((item, index) => {
+    const inputId = `${pathKey}-${item.id}`
+    const minimumReached = required && rows.length === 1
+    return `<div class="repeat-card ${ordered ? 'operation-row' : ''}" data-repeat-item>
+      <span class="row-number" aria-hidden="true">${index + 1}</span>
+      <label class="sr-only" for="${inputId}">${label} ${index + 1}</label>
+      <input id="${inputId}" data-row-path="${path}" data-id="${item.id}" data-row-field="value" value="${escapeHtml(item.value)}" placeholder="${placeholder}" aria-label="${label} ${index + 1}" ${activeErrors[path] ? `aria-invalid="true" aria-describedby="${errorId}"` : ''}/>
+      <button class="icon-button repeat-remove-button" type="button" data-action="remove-row" data-path="${path}" data-id="${item.id}" aria-label="${label} ${index + 1} 삭제${minimumReached ? `: ${minimumReason}` : ''}" ${minimumReached ? `disabled title="${minimumReason}"` : ''}>삭제</button>
+    </div>`
+  }).join('')
+  const emptyState = !rows.length && empty
+    ? `<div class="repeat-empty" role="note"><strong>${empty.title}</strong><span>${empty.message}</span></div>`
+    : ''
+  return `<section class="feature-field-group ${ordered ? 'is-ordered' : ''}" aria-labelledby="${pathKey}-title">
+    <div class="feature-field-heading"><h3 id="${pathKey}-title">${label}${required ? '<b aria-hidden="true"> *</b>' : ''}</h3><p>${help}</p></div>
+    ${emptyState}<div class="repeat-list">${items}</div>
+    <button class="feature-add-button" type="button" data-action="add-row" data-path="${path}">${addLabel}</button>
+    <span class="error-slot" id="${errorId}" aria-live="polite">${error(path)}</span>
+  </section>`
 }
 
 function tableRows(path, rows, columns) {
@@ -54,9 +75,9 @@ function renderIntent(state) {
 
 function renderFeatures(state) {
   return `<p class="step-purpose">구현할 기능과 필요한 보드·부품을 함께 연결하여 설계해 보세요.</p><div class="form-grid single-column design-form">
-    ${repeatText('features.requiredFeatures',state.features.requiredFeatures,'반드시 구현할 핵심 기능','기능을 한 가지씩 입력하세요',true)}
-    ${repeatText('features.optionalFeatures',state.features.optionalFeatures,'시간이 남으면 구현할 추가 기능','선택 기능')}
-    ${repeatText('features.operationSteps',state.features.operationSteps,'작품의 전체 작동 순서','한 단계씩 입력하세요',true)}
+    ${repeatText('features.requiredFeatures', state.features.requiredFeatures, { label: '반드시 구현할 핵심 기능', help: '프로젝트에서 반드시 구현해야 하는 기능을 한 가지씩 작성하세요.', placeholder: '예: 온도가 기준값을 넘으면 경고음을 출력한다.', addLabel: '+ 핵심 기능 추가', required: true })}
+    ${repeatText('features.optionalFeatures', state.features.optionalFeatures, { label: '시간이 남으면 구현할 추가 기능', help: '시간이 남을 경우 구현할 선택 기능을 작성하세요.', placeholder: '예: LCD에 현재 온도를 표시한다.', addLabel: '+ 추가 기능 추가', empty: { title: '아직 추가 기능이 없습니다.', message: '필수가 아닌 기능이 있다면 추가해 보세요.' } })}
+    ${repeatText('features.operationSteps', state.features.operationSteps, { label: '작품의 전체 작동 순서', help: '입력 → 처리 → 출력의 흐름에 따라 한 단계씩 작성하세요.', placeholder: '예: 사용자가 시작 버튼을 누른다.', addLabel: '+ 작동 단계 추가', required: true, ordered: true })}
   </div>`
 }
 
