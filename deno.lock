@@ -11,6 +11,9 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:docx@^9.7.1",
+        "npm:firebase-admin@^14.2.0",
+        "npm:firebase@^12.16.0",
         "npm:netlify-cli@^27.0.1",
         "npm:openai@^7.1.0",
         "npm:vite@^8.1.1"
