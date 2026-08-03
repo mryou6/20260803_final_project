@@ -6,21 +6,39 @@ const text = (value) => String(value ?? '').trim()
 const array = (value) => Array.isArray(value) ? value : []
 
 export async function checkOpenAiConnection() {
-  console.log('[OpenAI 연결 확인 시작]', { endpoint: CHECK_OPENAI_ENDPOINT })
+  console.info('[OpenAI 연결 확인 시작]', {
+    requestUrl: CHECK_OPENAI_ENDPOINT,
+    functionName: 'checkOpenAiConnection',
+  })
   try {
     const response = await fetch(CHECK_OPENAI_ENDPOINT, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
     const payload = await response.json().catch(() => null)
-    console.log('[OpenAI 연결 확인 응답]', {
-      status: response.status,
-      ok: response.ok,
-      body: payload,
+    console.info('[OpenAI 연결 응답]', {
+      requestUrl: CHECK_OPENAI_ENDPOINT,
+      responseStatus: response.status,
+      responseOk: response.ok,
+      errorName: payload?.errorCode ?? null,
+      errorMessage: payload?.message ?? null,
+      functionName: 'checkOpenAiConnection',
     })
     return response.ok && payload?.success === true
       ? { success: true, message: 'OpenAI API 연결이 확인되었습니다.' }
-      : { success: false, errorCode: payload?.errorCode ?? 'OPENAI_CHECK_FAILED' }
+      : {
+        success: false,
+        errorCode: payload?.errorCode ?? `OPENAI_HTTP_${response.status}`,
+        status: response.status,
+        error: payload?.message ?? `OpenAI 연결 확인 요청이 HTTP ${response.status}로 실패했습니다.`,
+      }
   } catch (error) {
-    console.error('[OpenAI 연결 확인 실패]', { name: error?.name, message: error?.message })
-    return { success: false }
+    console.error('[OpenAI 연결 실패]', {
+      requestUrl: CHECK_OPENAI_ENDPOINT,
+      responseStatus: null,
+      responseOk: false,
+      errorName: error?.name ?? 'Error',
+      errorMessage: error?.message ?? 'Unknown error',
+      functionName: 'checkOpenAiConnection',
+    })
+    return { success: false, errorCode: 'OPENAI_NETWORK_ERROR', error: error?.message }
   }
 }
 
